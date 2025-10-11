@@ -98,11 +98,16 @@ class TradeSignal:
     def is_add_position(self):
         return self._is_add_position
 
+    def delay_ms(self):
+        return (time.time()-self.signal_generate_start_time) * 1000
+
     def __str__(self):
         return (f"TradeSignal(pair1={self.pair1}, side1={self.side1}, price1={self.price1}, price2={self.price2}, "
                 f"spread_rate={self.spread_rate:.4%}, optimal_spread={self.optimal_spread:.4%}, z_score={self.z_score:.2f}, "
                 f"z_score_after_fee={self.z_score_after_fee:.2f},"
-                f"risk_check_passed={self.pass_risk_check}, risk_message='{self.risk_message}', _is_add_position={self._is_add_position})")
+                f"risk_check_passed={self.pass_risk_check}, risk_message='{self.risk_message}', "
+                f"_is_add_position={self._is_add_position}, "
+                f"delay={self.delay_ms():.2f}ms)")
 
 
 class RealtimeHedgeEngine:
@@ -581,13 +586,13 @@ class RealtimeHedgeEngine:
         """
         try:
             logger.info(f"🔨 {self.symbol} {self.exchange_pair} 执行对冲交易: {amount:.4f}(${amount*signal.price1:.2f}) @ {signal.price1}/{signal.price2} "
-                        f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({(time.time() - signal.signal_generate_start_time)*1000:.2f}ms)")
+                        f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
             logger.debug(signal)
             if time.time() - signal.signal_generate_start_time > 0.010:
                 # > 10ms 记录警告日志
-                logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {(time.time() - signal.signal_generate_start_time) * 1000:.0f}ms")
+                logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms")
             elif time.time() - signal.signal_generate_start_time > 0.050:
-                logger.error(f"❌❌ {self.symbol} {self.exchange_pair} 交易前总耗时: {(time.time() - signal.signal_generate_start_time) * 1000:.0f}ms 过大, 拒绝交易")
+                logger.error(f"❌❌ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms 过大, 拒绝交易")
                 return
             # 并发下单（传入参考价格）
             order1_task = asyncio.create_task(
@@ -916,7 +921,7 @@ class RealtimeHedgeEngine:
                 if time.time() - signal.signal_generate_start_time > 0.010:
                     # > 10ms 记录警告日志
                     logger.warning(
-                        f"⚠️ {self.symbol} {self.exchange_pair} 信号生成: {(time.time() - signal.signal_generate_start_time) * 1000:.0f}ms")
+                        f"⚠️ {self.symbol} {self.exchange_pair} 信号生成: {signal.delay_ms():.2f}ms")
 
                 # 风控检查
                 passed, msg = await self._risk_check(signal)
@@ -926,7 +931,7 @@ class RealtimeHedgeEngine:
                 if time.time() - signal.signal_generate_start_time > 0.010:
                     # > 10ms 记录警告日志
                     logger.warning(
-                        f"⚠️ {self.symbol} {self.exchange_pair} 风控检查: {(time.time() - signal.signal_generate_start_time) * 1000:.0f}ms")
+                        f"⚠️ {self.symbol} {self.exchange_pair} 风控检查: {signal.delay_ms():.2f}ms")
 
                 if not passed:
                     # 不满足条件，记录日志但继续寻找机会（避免刷屏）
@@ -945,7 +950,7 @@ class RealtimeHedgeEngine:
                             logger.debug(signal)
                             logger.info(
                                 f"⏳ {self.symbol} {self.exchange_pair} Spread Profit: {signal.spread_rate:.4%} "
-                                f"z_score:{signal.z_score:.2f}({self.trade_config.zscore_threshold:.2f}) "
+                                f"z_score:{signal.z_score:.2f}/{signal.z_score_after_fee:.2f}({self.trade_config.zscore_threshold:.2f}) {signal.delay_ms():.2f}ms"
                                 f"{remaining_info}{timeout_info}"
                             )
                         # 价差不足时等待较长时间再检查
@@ -964,7 +969,7 @@ class RealtimeHedgeEngine:
                 if time.time() - signal.signal_generate_start_time > 0.010:
                     # > 10ms 记录警告日志
                     logger.warning(
-                        f"⚠️ {self.symbol} {self.exchange_pair} 计算成交额: {(time.time() - signal.signal_generate_start_time) * 1000:.0f}ms")
+                        f"⚠️ {self.symbol} {self.exchange_pair} 计算成交额: {signal.delay_ms():.2f}ms")
 
                 if trade_amount <= 0:
                     logger.warning("计算的交易数量为0，跳过本次交易")
