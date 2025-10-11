@@ -1,0 +1,13 @@
+
+services:
+
+  arbitrage_process:
+    restart: always
+    platform: linux/arm64
+    environment:
+      - PYTHON_ENV=PROD
+      - TZ=Asia/Shanghai
+    build: .
+    command: [ "bash", "docker_start_process.sh" ]
+    volumes:
+      - ./:/app
