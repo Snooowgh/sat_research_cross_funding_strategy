@@ -59,7 +59,7 @@ class ManagerConfig:
 
     # 通知配置
     enable_notifications: bool = True
-    notify_interval_min: int = 30  # 通知间隔(分钟)
+    notify_interval_min: int = 3  # 通知间隔(分钟)
 
     # 启动配置
     engine_startup_delay_sec: float = 5.0  # 引擎启动间隔(秒)，避免API请求过多
