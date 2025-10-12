@@ -80,6 +80,7 @@ class TradeSignal:
     optimal_spread: float  # 价差
     spread_rate: float  # 价差收益率
     ma_spread: float
+    std_spread: float
     timestamp: float
     funding_rate_diff_apy: float
     z_score: float = None
@@ -109,7 +110,7 @@ class TradeSignal:
 
     def __str__(self):
         return (f"TradeSignal(pair1={self.pair1}, side1={self.side1}, price1={self.price1}, price2={self.price2}, "
-                f"spread_rate={self.spread_rate:.4%}, ma_spread={self.ma_spread:.4%}, "
+                f"spread_rate={self.spread_rate:.4%}, ma_spread={self.ma_spread:.4%}, std_spread={self.std_spread:.4%}, "
                 f"optimal_spread={self.optimal_spread:.4%}, z_score={self.z_score:.2f}, "
                 f"z_score_after_fee={self.z_score_after_fee:.2f},funding_rate_diff_apy={self.funding_rate_diff_apy:.2%}, "
                 f"risk_check_passed={self.pass_risk_check}, risk_message='{self.risk_message}', "
@@ -362,6 +363,7 @@ class RealtimeHedgeEngine:
             side2=optimal_side2,
             spread=spread,
             ma_spread=spread_stats.mean_spread,
+            std_spread=spread_stats.std_spread,
             spread_rate=spread_rate,
             timestamp=time.time(),
             z_score=z_score,
@@ -429,6 +431,7 @@ class RealtimeHedgeEngine:
             spread=spread,
             spread_rate=spread_rate,
             ma_spread=spread_stats.mean_spread,
+            std_spread=spread_stats.std_spread,
             timestamp=time.time(),
             z_score=z_score,
             optimal_spread=optimal_spread,
