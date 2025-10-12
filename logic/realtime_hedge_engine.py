@@ -196,6 +196,9 @@ class RealtimeHedgeEngine:
             logger.warning("风控缓存数据超过130秒未更新，可能存在风险")
         return self.exchange_combined_info_cache.get("risk_data")
 
+    def _get_max_open_notional_value(self):
+        return self._get_risk_data().max_open_notional_value(self.exchange_code_list)
+
     def _can_add_position(self):
         """是否可以加仓"""
         combined_info: MultiExchangeCombinedInfoModel = self._get_risk_data()
@@ -510,7 +513,8 @@ class RealtimeHedgeEngine:
                 f"订单金额低, 翻倍处理: {base_amount:.4f} (${base_amount * avg_price:.2f})"
             )
         # 如果翻倍后超过最大订单金额，则限制在最大订单金额
-        while base_amount * avg_price > self.trade_config.max_order_value_usd:
+        while base_amount * avg_price > self.trade_config.max_order_value_usd\
+                or base_amount * avg_price > self._get_max_open_notional_value():
             base_amount = align_with_decimal(base_amount / 2, base_amount)
             logger.debug(
                 f"订单金额高, 减半处理: {base_amount:.4f} (${base_amount * avg_price:.2f})"
@@ -561,10 +565,10 @@ class RealtimeHedgeEngine:
         # 4. 检查价差收益率
         if signal.is_add_position():
             if signal.spread_rate < self.risk_config.min_profit_rate:
-                return False, f"价差收益率不足 ({signal.spread_rate:.4%} < {self.risk_config.min_profit_rate:.4%})"
+                return False, f"保底价差收益率不足 ({signal.spread_rate:.4%} < {self.risk_config.min_profit_rate:.4%})"
         else:
             if signal.spread_rate < self.risk_config.reduce_pos_min_profit_rate:
-                return False, f"平仓价差收益率不足 ({signal.spread_rate:.4%} < {self.risk_config.min_profit_rate:.4%})"
+                return False, f"平仓保底价差收益率不足 ({signal.spread_rate:.4%} < {self.risk_config.min_profit_rate:.4%})"
 
         # 5. 增强检查：市场异常状态检测
         if self.trade_config.daemon_mode:

@@ -51,13 +51,16 @@ class SingleExchangeInfoModel:
         return self.leverage < self.default_safe_leverage and \
             self.maintenance_margin_ratio < self.default_safe_maintenance_margin_ratio and \
             self.cross_margin_usage < self.default_safe_cross_margin_usage and \
-            self.total_margin > 10 and self.available_margin > 10
+            self.total_margin > 10 and self.available_margin > 10 and self.max_open_notional_value() > 50
 
     def get_pair_pos_by_symbol(self, symbol):
         for pos1 in self.positions:
             if pos1.symbol == symbol:
                 return pos1
         return None
+
+    def max_open_notional_value(self):
+        return self.available_margin * self.default_safe_leverage
 
     def get_pos_cnt_filter_by_notional(self, min_notional=10):
         return sum([1 for pos in self.positions if abs(pos.notional) > min_notional])
@@ -335,7 +338,16 @@ class MultiExchangeCombinedInfoModel:
         return total_should, total_msg
 
     def should_force_reduce(self):
-        pass
+        return any(ex.should_force_reduce() for ex in self.exchange_infos)
+
+    def max_open_notional_value(self, exchange_codes: List[str] = None):
+        max_open_notional_value = None
+        for ex in self.exchange_infos:
+            if exchange_codes is None or ex.exchange_code in exchange_codes:
+                if max_open_notional_value is None:
+                    max_open_notional_value = ex.max_open_notional_value()
+                else:
+                    max_open_notional_value = min(max_open_notional_value, ex.max_open_notional_value())
 
     def __str__(self):
         """格式化输出多交易所综合信息"""
