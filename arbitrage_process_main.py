@@ -35,9 +35,7 @@ class EngineHealthMetrics:
     """引擎健康指标"""
     process_id: int
     start_time: float
-    restart_count: int = 0
     last_error: Optional[str] = None
-    consecutive_failures: int = 0
     is_healthy: bool = True
     last_trade_time: Optional[float] = None
     memory_usage_mb: float = 0.0
@@ -48,7 +46,6 @@ class EngineHealthMetrics:
     average_trade_amount: float = 0.0  # 平均交易额
     latest_ma_spread: float = 0.0  # 最新平均价差
     latest_funding_rate_diff_apy: float = 0.0  # 最新费率差APY
-    last_restart_reason: Optional[str] = None  # 最后重启原因
 
 @dataclass
 class ManagerConfig:
@@ -65,8 +62,6 @@ class ManagerConfig:
     engine_startup_delay_sec: float = 5.0  # 引擎启动间隔(秒)，避免API请求过多
 
     # 健康管理配置
-    max_restart_attempts: int = 3  # 最大重启尝试次数
-    restart_backoff_factor: float = 2.0  # 重启退避因子
     memory_limit_mb: float = 1000.0  # 内存限制(MB)
     no_trade_timeout_min: int = 30  # 无交易超时时间(分钟)
 
@@ -506,7 +501,7 @@ class MultiProcessArbitrageManager:
 
 
     async def _check_engine_health(self):
-        """智能检查引擎进程健康状态"""
+        """检查引擎进程健康状态"""
         failed_processes = []
         unhealthy_processes = []
 
@@ -524,7 +519,6 @@ class MultiProcessArbitrageManager:
             # 1. 检查进程存活性
             if not process.is_alive():
                 logger.warning(f"⚠️  {process_key} 引擎进程已停止运行 (退出码: {process.exitcode})")
-                health_metrics.consecutive_failures += 1
                 health_metrics.is_healthy = False
                 failed_processes.append(process_key)
 
@@ -542,26 +536,20 @@ class MultiProcessArbitrageManager:
                 unhealthy_processes.append(process_key)
                 health_metrics.is_healthy = False
 
-            # 3. 检查运行时长和重启次数
-            if health_metrics.restart_count >= self.config.max_restart_attempts:
-                logger.error(f"❌ {process_key} 重启次数已达上限 ({health_metrics.restart_count})")
-                unhealthy_processes.append(process_key)
-                continue
-
-            # 4. 检查无交易超时
+            # 3. 检查无交易超时
             if health_metrics.last_trade_time:
                 time_since_trade = time.time() - health_metrics.last_trade_time
                 if time_since_trade > self.config.no_trade_timeout_min * 60:
                     logger.warning(f"⚠️  {process_key} 长时间无交易活动: {time_since_trade/60:.1f}分钟")
 
-            # 5. 收集交易数据
+            # 4. 收集交易数据
             await self._collect_engine_trade_data(process_key)
 
-            # 6. 更新健康状态
+            # 5. 更新健康状态
             if process.is_alive() and process_key not in unhealthy_processes:
                 health_metrics.is_healthy = True
 
-        # 处理失败进程
+        # 处理失败进程（只通知，不重启）
         await self._handle_failed_processes(failed_processes)
 
         # 处理不健康进程
@@ -741,61 +729,25 @@ class MultiProcessArbitrageManager:
             logger.error(f"收集引擎交易数据失败 {process_key}: {e}")
 
     async def _handle_failed_processes(self, failed_processes: List[str]):
-        """处理失败进程的智能重启"""
+        """处理失败进程（仅通知）"""
         for process_key in failed_processes:
-            health_metrics = self.engine_health.get(process_key)
-            if not health_metrics:
-                continue
-
-            # 获取进程退出码和重启原因
+            # 获取进程退出码
             process = self.engine_processes.get(process_key)
             exit_code = process.exitcode if process else "unknown"
-            restart_reason = f"进程异常退出 (退出码: {exit_code})"
 
-            # 检查是否应该重启
-            if not self._should_restart_engine(health_metrics):
-                logger.error(f"❌ {process_key} 不再重启，已达到最大尝试次数")
-                health_metrics.last_restart_reason = f"{restart_reason} - 达到最大重启次数"
-                self._add_error_log("MAX_RESTART_REACHED",
-                                 f"{process_key} 达到最大重启次数，不再重启", process_key)
-                continue
+            # 发送进程崩溃通知
+            self._add_error_log("ENGINE_CRASH",
+                             f"{process_key} 进程崩溃，退出码: {exit_code}，请手动检查", process_key)
 
-            try:
-                logger.info(f"🔄 重启 {process_key} 引擎进程 (第{health_metrics.restart_count + 1}次)...")
+            # 从进程列表中移除已失败的进程
+            if process_key in self.engine_processes:
+                del self.engine_processes[process_key]
+            if process_key in self.engine_configs:
+                del self.engine_configs[process_key]
+            if process_key in self.stop_events:
+                del self.stop_events[process_key]
 
-                # 清理旧进程资源
-                await self._cleanup_process(process_key)
-
-                # 等待退避时间
-                backoff_time = self.config.restart_backoff_factor ** health_metrics.restart_count
-                if backoff_time > 1:
-                    logger.info(f"⏱️  等待退避时间: {backoff_time:.1f}分钟")
-                    await asyncio.sleep(backoff_time * 60)
-
-                # 重新启动进程
-                engine_config = self.engine_configs[process_key]
-                await self._start_engine_process(engine_config)
-
-                # 更新健康指标
-                health_metrics.restart_count += 1
-                health_metrics.consecutive_failures = 0
-                health_metrics.start_time = time.time()
-                health_metrics.last_restart_reason = restart_reason
-
-                self.stats['total_engine_restarts'] += 1
-                logger.success(f"✅ {process_key} 引擎进程重启成功")
-
-                # 记录重启通知
-                self._add_error_log("ENGINE_RESTART",
-                                 f"{process_key} 重启成功 (第{health_metrics.restart_count}次) - 原因: {restart_reason}",
-                                 process_key)
-
-            except Exception as e:
-                logger.error(f"❌ 重启 {process_key} 引擎进程失败: {e}")
-                health_metrics.consecutive_failures += 1
-                health_metrics.last_restart_reason = f"重启失败: {str(e)}"
-                self._add_error_log("RESTART_FAILED",
-                                 f"{process_key} 重启失败: {str(e)}", process_key)
+            logger.error(f"❌ {process_key} 进程已从管理器中移除，需要手动重启")
 
     async def _handle_unhealthy_processes(self, unhealthy_processes: List[str]):
         """处理不健康的进程"""
@@ -807,41 +759,7 @@ class MultiProcessArbitrageManager:
             # 可以选择重启不健康的进程
             logger.warning(f"⚠️  {process_key} 进程不健康，将监控是否需要重启")
 
-    def _should_restart_engine(self, health_metrics: EngineHealthMetrics) -> bool:
-        """判断是否应该重启引擎"""
-        # 检查重启次数限制
-        if health_metrics.restart_count >= self.config.max_restart_attempts:
-            return False
-
-        # 检查连续失败次数
-        if health_metrics.consecutive_failures > 5:
-            return False
-
-        return True
-
-    async def _cleanup_process(self, process_key: str):
-        """清理进程资源"""
-        try:
-            # 发送停止信号
-            if process_key in self.stop_events:
-                self.stop_events[process_key].set()
-                del self.stop_events[process_key]
-
-            # 等待进程退出
-            if process_key in self.engine_processes:
-                process = self.engine_processes[process_key]
-                process.join(timeout=10)
-
-                if process.is_alive():
-                    logger.warning(f"⚠️  {process_key} 进程未正常退出，强制终止")
-                    process.terminate()
-                    process.join(timeout=5)
-
-                del self.engine_processes[process_key]
-
-        except Exception as e:
-            logger.error(f"❌ 清理 {process_key} 进程资源失败: {e}")
-
+    
     async def _send_status_notification(self):
         """发送增强状态通知"""
         if not self.config.enable_notifications:
@@ -859,15 +777,12 @@ class MultiProcessArbitrageManager:
             # 计算健康统计
             healthy_count = len([h for h in self.engine_health.values() if h.is_healthy])
             avg_memory = sum(h.memory_usage_mb for h in self.engine_health.values()) / len(self.engine_health) if self.engine_health else 0
-            max_restarts = max((h.restart_count for h in self.engine_health.values()), default=0)
 
             # 构建基础信息
             message = (
                 f"📊 套利管理器智能状态报告\n"
                 f"🤖 活跃引擎: {active_count} (健康: {healthy_count})\n"
-                f"🚀 总启动/重启: {total_started}/{total_restarts}\n"
                 f"💾 平均内存: {avg_memory:.0f}MB\n"
-                f"🔄 最大重启次数: {max_restarts}\n"
                 f"🕐 风控更新: {time.strftime('%H:%M:%S', time.localtime(self.last_risk_update_time))}\n"
                 f"⏱️  运行时长: {int((time.time() - self.stats.get('start_time', time.time())) / 60)}分钟\n"
             )
@@ -891,7 +806,6 @@ class MultiProcessArbitrageManager:
             for process_key, health in list(self.engine_health.items())[:8]:  # 显示前8个引擎
                 status_emoji = "✅" if health.is_healthy else "❌"
                 memory_str = f"{health.memory_usage_mb:.0f}MB" if health.memory_usage_mb > 0 else "N/A"
-                restart_str = f"({health.restart_count}重启)" if health.restart_count > 0 else ""
 
                 # 交易数据
                 trade_info = ""
@@ -909,11 +823,8 @@ class MultiProcessArbitrageManager:
                 if health.latest_funding_rate_diff_apy != 0:
                     trade_info += f" 费率差:{health.latest_funding_rate_diff_apy:.2%}"
 
-                # 添加重启原因（如果有）
-                restart_reason = f" | {health.last_restart_reason}" if health.last_restart_reason else ""
-
                 engine_details.append(
-                    f"{status_emoji} {process_key} {memory_str}{restart_str}{trade_info}{restart_reason}"
+                    f"{status_emoji} {process_key} {memory_str}{trade_info}"
                 )
 
             # 添加交易统计汇总
@@ -1048,13 +959,11 @@ class MultiProcessArbitrageManager:
 
             # 统计健康数据
             healthy_engines = len([h for h in self.engine_health.values() if h.is_healthy])
-            total_restarts = sum(h.restart_count for h in self.engine_health.values())
 
             message = (
                 f"🏁 套利管理器运行报告\n"
                 f"⏱️  总运行时长: {runtime_minutes} 分钟\n"
                 f"🚀 总启动次数: {self.stats['total_engines_started']}\n"
-                f"🔄 总重启次数: {total_restarts}\n"
                 f"💚 健康引擎: {healthy_engines}/{len(self.engine_health)}\n"
                 f"👋 管理器已优雅关闭"
             )
