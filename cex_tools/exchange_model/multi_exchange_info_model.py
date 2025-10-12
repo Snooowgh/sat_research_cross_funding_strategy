@@ -25,12 +25,12 @@ class SingleExchangeInfoModel:
         self.default_safe_maintenance_margin_ratio = 0.4
         self.default_safe_cross_margin_usage = 0.6
 
-        self.target_leverage = 2.5
+        self.target_leverage = 3
         self.target_maintenance_margin_ratio = 0.4
         self.target_margin_usage_ratio = 0.6
 
-        self.danger_leverage = 3
-        self.danger_maintenance_margin_ratio = 0.5
+        self.danger_leverage = 5
+        self.danger_maintenance_margin_ratio = 0.6
         self.danger_margin_usage_ratio = 0.70
 
         self.force_reduce_leverage = 10
