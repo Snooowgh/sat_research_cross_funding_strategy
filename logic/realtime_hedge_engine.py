@@ -23,6 +23,7 @@ from config.env_config import env_config
 from logic.strategy_math import calculate_zscore, infer_optimal_spread_by_zscore
 from utils.decorators import async_timed_cache
 from utils.math_utils import align_with_decimal
+from utils.notify_tools import async_notify_telegram
 
 
 @dataclass
@@ -40,6 +41,7 @@ class RiskConfig:
     profit_rate_adjust_threshold: int = 3  # 连续多少笔交易触发调整
     no_trade_reduce_timeout_sec: float = 0  # 无成交多久后降低收益率（秒，0表示禁用）
     no_trade_reduce_step_multiplier: float = 1.5  # 无成交降低收益率时的步长倍数（相对于正常步长）
+    auto_pos_balance_usd_value_limit: float = 1000.0 # 自动平衡仓位金额的最大USD值
 
 
 @dataclass
@@ -53,7 +55,7 @@ class TradeConfig:
     amount_max: float = 0  # 单笔交易最大数量
     amount_step: float = 1.0  # 数量步长
     total_amount: float = 0.0  # 总交易数量
-    trade_interval_sec: float = 0.2  # 交易间隔时间（秒）
+    trade_interval_sec: float = 0.1  # 交易间隔时间（秒）
     use_dynamic_amount: bool = True  # 是否根据订单簿动态调整下单数量
     max_first_level_ratio: float = 1  # 最大吃掉第一档流动性的比例（0.5 = 50%）
     no_trade_timeout_sec: float = 0  # 无交易自动关闭超时时间（秒，0表示禁用）
@@ -132,6 +134,7 @@ class RealtimeHedgeEngine:
         self.exchange2 = exchange2
         self.trade_config = trade_config
         self.symbol = trade_config.pair1.replace("USDT", "")
+        self.exchange_code_list = [exchange1.exchange_code, exchange2.exchange_code]
         self.exchange_pair = f"{exchange1.exchange_code}-{exchange2.exchange_code}"
         self.taker_fee_rate = exchange1.taker_fee_rate + exchange2.taker_fee_rate
         self.risk_config = risk_config or RiskConfig()
@@ -169,6 +172,9 @@ class RealtimeHedgeEngine:
         # 无交易最多下调多少次最小收益率
         self._reduce_min_profit_rate_cnt = 0
 
+    async def update_exchange_info_helper(self):
+        raise Exception("未传参！!")
+
     @async_timed_cache(timeout=3600)
     async def _get_pair_market_info(self):
         """获取交易对的市场信息, 1h更新一次"""
@@ -185,9 +191,9 @@ class RealtimeHedgeEngine:
         funding_rate2 = await self.exchange2.get_funding_rate(self.trade_config.pair2)
         return spread_stats, funding_rate1, funding_rate2
 
-    def _get_risk_data(self):
-        if time.time() - self.exchange_combined_info_cache.get("update_time") > 330:
-            logger.warning("风控缓存数据超过330秒未更新，可能存在风险")
+    def _get_risk_data(self) -> MultiExchangeCombinedInfoModel:
+        if time.time() - self.exchange_combined_info_cache.get("update_time") > 130:
+            logger.warning("风控缓存数据超过130秒未更新，可能存在风险")
         return self.exchange_combined_info_cache.get("risk_data")
 
     def _can_add_position(self):
@@ -852,7 +858,7 @@ class RealtimeHedgeEngine:
         持续监控订单簿，一旦发现满足条件的信号立即执行交易
         """
         logger.info(f"{self.symbol} {self.exchange_pair} 启动交易...")
-        await self._update_pos_info()
+        await self._update_exchange_info()
         logger.info(f"当前持仓: {self._position1} / {self._position2}")
         # 如果启用了超时，记录超时配置
         if self._timeout_enabled:
@@ -991,7 +997,7 @@ class RealtimeHedgeEngine:
                 # 执行交易
                 await self._execute_trade(signal, trade_amount)
 
-                await self._update_pos_info()
+                await self._update_exchange_info()
 
                 # 交易间隔（给市场一点时间恢复）
                 await asyncio.sleep(self.trade_config.trade_interval_sec)
@@ -1018,24 +1024,70 @@ class RealtimeHedgeEngine:
 
             except Exception as e:
                 logger.error(f"❌ 交易循环异常: {e}")
-                logger.exception(e)
                 break
 
         logger.info(
             f"🏁 交易完成: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
+        await self._auto_balance_position()
 
-    async def _update_pos_info(self):
-        positions1 = await self.exchange1.get_all_cur_positions()
-        positions2 = await self.exchange2.get_all_cur_positions()
-        self._position1 = list(filter(lambda pos: pos.symbol == self.symbol, positions1))
-        self._position1 = self._position1[0] if len(self._position1) > 0 else None
-        self._position2 = list(filter(lambda pos: pos.symbol == self.symbol, positions2))
-        self._position2 = self._position2[0] if len(self._position2) > 0 else None
-        if not self._position1 or not self._position2:
+    async def _auto_balance_position(self):
+        """
+            自动平衡仓位
+            - 优先减仓
+        """
+        risk_data = self.exchange_combined_info_cache['risk_data']
+        imbalance_value = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
+        if abs(imbalance_value) < 50:
             return
-        imbalance_value = (self._position1.positionAmt + self._position2.positionAmt) * self._position1.entryPrice
-        if abs(imbalance_value) > 50:
-            raise Exception(f"{self.symbol} {self.exchange_pair}仓位不匹配: ${imbalance_value:.2f}")
+        imbalance_amt = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
+        if imbalance_amt > 0:
+            # 做空
+            side = TradeSide.SELL
+        else:
+            # 做多
+            side = TradeSide.BUY
+        use_exchange, other_exchange = (self.exchange1, self.exchange2) if self._position1.position_side != side else (self.exchange2, self.exchange1)
+        mid_price = use_exchange.get_tick_price(self.symbol)
+        trade_amt = abs(imbalance_amt)
+        if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit:
+            try:
+                await use_exchange.make_new_order(self.trade_config.pair1,
+                                                side,
+                                                order_type="MARKET",
+                                                quantity=trade_amt,
+                                                  price=mid_price, reduceOnly=True)
+                text = (f"⚠️ {self._position1.pair}({use_exchange.exchange_code}) {side} "
+                        f"自动平衡仓位, 减仓:  {imbalance_amt} ${imbalance_value:.4f}")
+            except Exception as e:
+                other_exchange.make_new_order(self.trade_config.pair2,
+                                              side,
+                                              order_type="MARKET",
+                                              quantity=trade_amt, price=mid_price)
+                text = (f"⚠️⚠️ {self.trade_config.pair2}({other_exchange.exchange_code}), "
+                        f"自动执行加仓: {imbalance_amt} ${imbalance_value:.4f} "
+                        f"| ❌{use_exchange.exchange_code}减仓交易异常:{e}")
+                self._running = False
+        else:
+            text = (f"❌ {self._position1.pair}({use_exchange.exchange_code}), "
+                    f"金额超限, 需要手动执行减仓: {trade_amt} ${imbalance_value:.2f}")
+        logger.warning(text)
+        await async_notify_telegram(text)
+
+
+    async def _update_exchange_info(self):
+        risk_data, update_time = await self.update_exchange_info_helper()
+        # 分发给所有引擎进程
+        self.exchange_combined_info_cache['risk_data'] = risk_data
+        self.exchange_combined_info_cache['update_time'] = update_time
+        position_list = risk_data.get_symbol_exchange_positions(self.symbol,
+                                                                self.exchange_code_list)
+        if len(position_list) >= 2:
+            self._position1 = position_list[0]
+            self._position2 = position_list[1]
+            await self._auto_balance_position()
+        else:
+            self._position1 = None
+            self._position2 = None
 
     async def stop(self):
         """停止引擎"""

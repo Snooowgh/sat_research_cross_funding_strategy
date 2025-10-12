@@ -293,7 +293,7 @@ class LighterFuture:
     async def get_all_cur_positions(self):
         account_info = await self.get_account_info()
         positions = list(filter(lambda a: float(a.position) > 0, account_info.positions))
-        return list(map(lambda a: LighterPositionDetail(a), positions))
+        return list(map(lambda a: LighterPositionDetail(a, self.exchange_code), positions))
 
     async def get_available_margin(self):
         return float((await self.get_account_info()).available_balance)

@@ -11,7 +11,8 @@ from cex_tools.exchange_model.base_model import BaseModel, TradeDirection
 
 class BinancePositionDetail(BaseModel):
 
-    def __init__(self, binance_position):
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
         self.adl = int(binance_position.get("adl") or 0)  # 1~5
         self.entryPrice = float(binance_position.get("entryPrice"))  # "0.00000",
         self.breakEvenPrice = float(binance_position.get("breakEvenPrice"))  # "0.0",
@@ -58,7 +59,8 @@ class BinancePositionDetail(BaseModel):
 
 class OkxPositionDetail(BinancePositionDetail):
 
-    def __init__(self, binance_position):
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
         self.adl = int(binance_position.get("adl") or 1)  # 1~5
         self.entryPrice = float(binance_position.get("avgPx")) if binance_position.get("avgPx") else 0  # "0.00000",
         # self.breakEvenPrice = float(binance_position.get("breakEvenPrice"))  # "0.0",
@@ -94,7 +96,8 @@ class OkxPositionDetail(BinancePositionDetail):
 
 class BitgetPositionDetail(BinancePositionDetail):
 
-    def __init__(self, binance_position):
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
         self.adl = int(binance_position.get("adl") or 1)  # 1~5
         self.entryPrice = None  # "0.00000",
         self.breakEvenPrice = float(binance_position.get("breakEvenPrice"))  # "0.0",
@@ -121,7 +124,8 @@ class BitgetPositionDetail(BinancePositionDetail):
 
 class HyperliquidPositionDetail(BinancePositionDetail):
 
-    def __init__(self, binance_position):
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
         self.adl = int(binance_position.get("adl") or 1)  # 1~5
         self.entryPrice = float(binance_position.get("entryPx"))  # "0.00000",
         self.breakEvenPrice = 0  # "0.0",
@@ -150,7 +154,8 @@ class HyperliquidPositionDetail(BinancePositionDetail):
 
 class LighterPositionDetail(BinancePositionDetail):
 
-    def __init__(self, binance_position):
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
         binance_position = binance_position.to_dict()
         self.adl = int(binance_position.get("adl") or 0)  # 1~5
         self.entryPrice = float(binance_position.get("avg_entry_price"))  # "0.00000",
@@ -177,26 +182,27 @@ class LighterPositionDetail(BinancePositionDetail):
 class BybitPositionDetail(BinancePositionDetail):
     """Bybit持仓详情"""
 
-    def __init__(self, bybit_position):
-        self.adl = int(bybit_position.get("adlRankIndicator") or 0)  # 0~5
-        self.entryPrice = float(bybit_position.get("avgPrice") or 0)  # 平均入场价
-        self.liquidationPrice = float(bybit_position.get("liqPrice") or 0)  # 强平价格
+    def __init__(self, binance_position, exchange_code=None):
+        self.exchange_code = exchange_code
+        self.adl = int(binance_position.get("adlRankIndicator") or 0)  # 0~5
+        self.entryPrice = float(binance_position.get("avgPrice") or 0)  # 平均入场价
+        self.liquidationPrice = float(binance_position.get("liqPrice") or 0)  # 强平价格
         self.fundingFee = 0  # Bybit在仓位信息中不直接返回funding fee
-        self.markPrice = float(bybit_position.get("markPrice") or 0)  # 标记价格
-        self.leverage = float(bybit_position.get("leverage") or 1)  # 杠杆倍数
+        self.markPrice = float(binance_position.get("markPrice") or 0)  # 标记价格
+        self.leverage = float(binance_position.get("leverage") or 1)  # 杠杆倍数
 
         # 仓位数量（Bybit使用size字段）
-        size = float(bybit_position.get("size") or 0)
-        side = bybit_position.get("side")  # "Buy" or "Sell"
+        size = float(binance_position.get("size") or 0)
+        side = binance_position.get("side")  # "Buy" or "Sell"
 
         # 根据方向确定仓位正负
         self.positionAmt = size if side == "Buy" else -size
-        self.notional = float(bybit_position.get("positionValue") or 0)
+        self.notional = float(binance_position.get("positionValue") or 0)
         self.notional = self.notional if side == "Buy" else -self.notional
-        self.pair = bybit_position.get("symbol")
+        self.pair = binance_position.get("symbol")
         self.symbol = self.pair.replace("USDT", "")  # "BTCUSDT"
-        self.unRealizedProfit = float(bybit_position.get("unrealisedPnl") or 0)  # 未实现盈亏
-        self.updateTime = int(bybit_position.get("updatedTime") or 0)  # 更新时间（毫秒）
+        self.unRealizedProfit = float(binance_position.get("unrealisedPnl") or 0)  # 未实现盈亏
+        self.updateTime = int(binance_position.get("updatedTime") or 0)  # 更新时间（毫秒）
 
         # 确定仓位方向
         if self.positionAmt > 0:

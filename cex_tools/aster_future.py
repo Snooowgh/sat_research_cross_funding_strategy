@@ -150,22 +150,15 @@ class AsterFuture:
 
     def get_all_cur_positions(self) -> List[BinancePositionDetail]:
         """获取所有当前持仓"""
-        try:
-            positions = self._request("GET", "/fapi/v2/positionRisk", signed=True)
-            positions = [p for p in positions if float(p.get("positionAmt", 0)) != 0]
-            return [BinancePositionDetail(p) for p in positions]
-        except Exception as e:
-            logger.error(f"[{self.exchange_code}] 获取持仓失败: {e}")
-            time.sleep(1)
-            positions = self._request("GET", "/fapi/v2/positionRisk", signed=True)
-            positions = [p for p in positions if float(p.get("positionAmt", 0)) != 0]
-            return [BinancePositionDetail(p) for p in positions]
+        positions = self._request("GET", "/fapi/v2/positionRisk", signed=True)
+        positions = [p for p in positions if float(p.get("positionAmt", 0)) != 0]
+        return [BinancePositionDetail(p, self.exchange_code) for p in positions]
 
     def get_position(self, symbol: str) -> Optional[BinancePositionDetail]:
         """获取指定交易对的持仓"""
         positions = self._request("GET", "/fapi/v2/positionRisk", params={"symbol": symbol}, signed=True)
         if positions:
-            return BinancePositionDetail(positions[0])
+            return BinancePositionDetail(positions[0], self.exchange_code)
         return None
 
     @timed_cache(timeout=3)

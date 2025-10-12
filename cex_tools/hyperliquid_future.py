@@ -122,7 +122,7 @@ class HyperLiquidFuture:
 
     def get_all_cur_positions(self):
         all_pos = self.get_account_details()["assetPositions"]
-        ret = [HyperliquidPositionDetail(pos["position"]) for pos in all_pos]
+        ret = [HyperliquidPositionDetail(pos["position"], self.exchange_code) for pos in all_pos]
         return ret
 
     def get_position(self, pair):

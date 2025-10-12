@@ -83,7 +83,7 @@ class OkxFuture:
         okx_positions = self.account.get_positions()["data"]
         for k in okx_positions:
             k["amt"] = float(k["pos"]) * self.get_symbol_sheet_to_amt(k["instId"])
-        okx_positions = list(map(lambda a: OkxPositionDetail(a), okx_positions))
+        okx_positions = list(map(lambda a: OkxPositionDetail(a, self.exchange_code), okx_positions))
         return okx_positions
 
     def convert_symbol(self, symbol):

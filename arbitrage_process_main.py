@@ -163,6 +163,16 @@ def run_real_engine_in_process(engine_config: EngineConfig,
             arbitrage_param = MultiExchangeArbitrageParam(auto_init=True)
             await arbitrage_param.init_async_exchanges()
             await asyncio.sleep(0.3)  # 确保交易所初始化完成
+
+            async def update_exchange_info_helper():
+                info = await get_multi_exchange_info_combined_model(
+                    async_exchange_list=arbitrage_param.async_exchange_list,
+                    find_opportunities=False,
+                    opportunity_limit=0
+                )
+                update_time = time.time()
+                return info, update_time
+
             # 获取交易所实例
             exchange1 = arbitrage_param.async_exchanges[engine_config.exchange1_code]
             exchange2 = arbitrage_param.async_exchanges[engine_config.exchange2_code]
@@ -197,7 +207,7 @@ def run_real_engine_in_process(engine_config: EngineConfig,
                 risk_config=risk_config,
                 exchange_combined_info_cache=risk_data_dict
             )
-
+            engine.update_exchange_info_helper = update_exchange_info_helper
             # 启动引擎
             await engine.start()
 
@@ -306,8 +316,8 @@ class MultiProcessArbitrageManager:
             # 获取风控数据
             self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
-                find_opportunities=False,  # 管理器不需要寻找机会
-                opportunity_limit=0
+                find_opportunities=True,  # 管理器不需要寻找机会
+                opportunity_limit=5
             )
             self.last_risk_update_time = time.time()
 
@@ -476,8 +486,8 @@ class MultiProcessArbitrageManager:
         try:
             self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
-                find_opportunities=False,  # 管理器不需要寻找机会
-                opportunity_limit=0
+                find_opportunities=True,
+                opportunity_limit=5
             )
             logger.debug(f"🔄 风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
             self.last_risk_update_time = time.time()
@@ -890,15 +900,14 @@ class MultiProcessArbitrageManager:
                     total_trades += health.trade_count
                     total_volume += health.cumulative_volume
                     avg_trade = health.average_trade_amount if health.average_trade_amount > 0 else (health.cumulative_volume / health.trade_count)
-                    trade_info = f" 📈{health.trade_count}笔 ${avg_trade:.0f}"
-
-                    # 添加价差和费率信息
-                    if health.latest_ma_spread != 0:
-                        trade_info += f" 价差:{health.latest_ma_spread:.4%}"
-                    if health.latest_funding_rate_diff_apy != 0:
-                        trade_info += f" 费率:{health.latest_funding_rate_diff_apy:.2%}apy"
+                    trade_info += f" 📈{health.trade_count}笔 ${avg_trade:.0f}"
                 else:
-                    trade_info = " 📭无交易"
+                    trade_info += " 📭无交易"
+                # 添加价差和费率信息
+                if health.latest_ma_spread != 0:
+                    trade_info += f" 价差:{health.latest_ma_spread:.4%}"
+                if health.latest_funding_rate_diff_apy != 0:
+                    trade_info += f" 费率差:{health.latest_funding_rate_diff_apy:.2%}"
 
                 # 添加重启原因（如果有）
                 restart_reason = f" | {health.last_restart_reason}" if health.last_restart_reason else ""

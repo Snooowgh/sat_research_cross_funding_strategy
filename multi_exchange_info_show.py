@@ -48,12 +48,15 @@ async def get_single_exchange_info_model(async_exchange) -> SingleExchangeInfoMo
         return exchange_info
 
 
-async def get_multi_exchange_info_combined_model(async_exchange_list, find_opportunities=True, opportunity_limit=5) -> MultiExchangeCombinedInfoModel:
+async def get_multi_exchange_info_combined_model(async_exchange_list, find_opportunities=True,
+                                                 opportunity_limit=5) -> MultiExchangeCombinedInfoModel:
     """
     获取多个交易所的综合信息模型
 
     Args:
         async_exchange_list: 异步交易所列表
+        find_opportunities
+        opportunity_limit
 
     Returns:
         MultiExchangeCombinedInfoModel: 多交易所综合信息模型

@@ -50,7 +50,8 @@ class SingleExchangeInfoModel:
         """是否可以开新仓"""
         return self.leverage < self.default_safe_leverage and \
             self.maintenance_margin_ratio < self.default_safe_maintenance_margin_ratio and \
-            self.cross_margin_usage < self.default_safe_cross_margin_usage
+            self.cross_margin_usage < self.default_safe_cross_margin_usage and \
+            self.total_margin > 10 and self.available_margin > 10
 
     def get_pair_pos_by_symbol(self, symbol):
         for pos1 in self.positions:
@@ -218,24 +219,43 @@ class MultiExchangeCombinedInfoModel:
         """活跃仓位数量（合并后）"""
         return len([pos for pos in self.merged_positions if abs(pos['notional']) > 10000])
 
-    def get_symbol_positions(self, symbol: str) -> list:
+    def get_exchange_info_by_code(self, exchange_code: str):
+        """根据交易所代码获取交易所信息"""
+        for exchange_info in self.exchange_infos:
+            if exchange_info.exchange_code == exchange_code:
+                return exchange_info
+        return None
+
+    def get_symbol_exchange_positions(self, symbol: str, exchange_codes: List[str] = None) -> list:
         """
-        获取指定交易对的所有仓位
+        获取指定交易对和交易所的所有仓位
         Args:
             symbol: 交易对符号（如 "BTC" 或 "BTCUSDT"）
+            exchange_codes:
         Returns:
             list: 仓位对象列表
         """
-        symbol = symbol.replace('USDT', '')  # 标准化symbol格式
         positions = []
 
         for exchange_info in self.exchange_infos:
             for pos in exchange_info.positions:
-                pos_symbol = pos.symbol.replace('USDT', '')
-                if pos_symbol == symbol:
+                if pos.symbol == symbol and (exchange_codes is None or pos.exchange_code in exchange_codes):
                     positions.append(pos)
-
         return positions
+
+    def get_pos_imbalanced_value(self, symbol: str, exchange_codes: List[str] = None):
+        positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
+        value = 0
+        for pos in positions_list:
+            value += pos.positionAmt * pos.entryPrice
+        return value
+
+    def get_pos_imbalanced_amt(self, symbol: str, exchange_codes: List[str] = None):
+        positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
+        value = 0
+        for pos in positions_list:
+            value += pos.positionAmt
+        return value
 
     def merge_positions(self):
         """合并相同交易对的仓位"""

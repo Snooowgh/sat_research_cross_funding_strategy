@@ -117,13 +117,13 @@ class BinanceFuture(UMFutures):
             time.sleep(1)
             binance_positions = self.get_position_risk(recvWindow=self.recvWindow)
         binance_positions = list(filter(lambda a: float(a.get("positionAmt")) != 0, binance_positions))
-        binance_positions = list(map(lambda a: BinancePositionDetail(a), binance_positions))
+        binance_positions = list(map(lambda a: BinancePositionDetail(a, self.exchange_code), binance_positions))
         return binance_positions
 
     def get_position(self, symbol):
         binance_positions = self.get_position_risk(symbol=symbol, recvWindow=self.recvWindow)
         if binance_positions:
-            return BinancePositionDetail(binance_positions[0])
+            return BinancePositionDetail(binance_positions[0], self.exchange_code)
         else:
             return None
 

@@ -180,7 +180,7 @@ class BybitFuture(FutureExchange):
             )
             positions = result.get("result", {}).get("list", [])
             # 过滤掉零仓位
-            positions = [BybitPositionDetail(p) for p in positions if float(p.get("size", 0)) != 0]
+            positions = [BybitPositionDetail(p, self.exchange_code) for p in positions if float(p.get("size", 0)) != 0]
             return positions
         except Exception as e:
             logger.error(f"获取Bybit仓位失败: {e}")
@@ -200,7 +200,7 @@ class BybitFuture(FutureExchange):
             )
             positions = result.get("result", {}).get("list", [])
             if positions and float(positions[0].get("size", 0)) != 0:
-                return BybitPositionDetail(positions[0])
+                return BybitPositionDetail(positions[0], self.exchange_code)
             return None
         except Exception as e:
             logger.error(f"获取 {symbol} 仓位失败: {e}")

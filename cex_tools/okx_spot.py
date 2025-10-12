@@ -75,7 +75,7 @@ class OkxSpot:
     def get_all_cur_positions(self):
         okx_positions = self.account.get_balances()["data"]["details"]
         # 去掉USDT
-        r = [OkxSpotDetail(o) for o in okx_positions]
+        r = [OkxSpotDetail(o, self.exchange_code) for o in okx_positions]
         r = [o for o in r if o.ccy != "USDT"]
         r = [o for o in r if abs(o.notional) > 10]
         # availBal, ccy, eqUsd, maxLoan, interest
