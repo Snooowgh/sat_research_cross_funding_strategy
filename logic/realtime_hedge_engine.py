@@ -6,6 +6,8 @@
 @Description : 基于WebSocket实时订单簿的对冲交易引擎
 @Time        : 2025/10/2 14:15
 """
+import traceback
+
 from cex_tools.exchange_model.multi_exchange_info_model import MultiExchangeCombinedInfoModel
 from cex_tools.exchange_model.position_model import BinancePositionDetail
 from cex_tools.hedge_spread_analyzer import HedgeSpreadAnalyzer
@@ -856,6 +858,45 @@ class RealtimeHedgeEngine:
             return True
         return False
 
+    async def auto_force_reduce_position_to_safe(self):
+        risk_data = self._get_risk_data()
+        if not risk_data.should_force_reduce():
+            return
+        reduce_side1 = self._position2.position_side
+        reduce_side2 = self._position1.position_side
+        amount = self._position1.positionAmt
+        mid_price = await self.exchange1.get_tick_price(self.symbol)
+        while amount * mid_price > self.trade_config.max_order_value_usd:
+            amount = amount / 2
+        amount = await self.exchange1.convert_size(self.trade_config.pair1, amount)
+        order1_task = asyncio.create_task(
+            self._place_order_exchange1(self.trade_config.pair1, reduce_side1, amount, mid_price,
+                                        reduceOnly=True)
+        )
+        order2_task = asyncio.create_task(
+            self._place_order_exchange2(self.trade_config.pair2, reduce_side2, amount, mid_price,
+                                        reduceOnly=True)
+        )
+
+        # 等待两个订单都完成
+        order1, order2 = await asyncio.gather(order1_task, order2_task)
+
+        # 等待订单成交
+        await asyncio.sleep(0.1)
+
+        # 获取成交均价
+        order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
+        order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
+
+        # 计算实际价差收益
+        actual_spread = order1_avg_price - order2_avg_price
+        if reduce_side1 == TradeSide.BUY:
+            spread_profit = -actual_spread * amount
+        else:
+            spread_profit = actual_spread * amount
+        logger.warning(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} 触发强制减仓: ${amount * mid_price:.2f}, "
+                       f"价差收益:${spread_profit:.2f}")
+
     async def _trading_loop(self):
         """
         交易主循环
@@ -1003,6 +1044,8 @@ class RealtimeHedgeEngine:
 
                 await self._update_exchange_info()
 
+                await self.auto_force_reduce_position_to_safe()
+
                 # 交易间隔（给市场一点时间恢复）
                 await asyncio.sleep(self.trade_config.trade_interval_sec)
 
@@ -1027,7 +1070,8 @@ class RealtimeHedgeEngine:
                     self._last_trade_time = time.time()
 
             except Exception as e:
-                error_msg = f"❌❌❌ {self.symbol} {self.exchange_pair} 交易进程结束, 错误内容: {e}"
+                error_msg = (f"❌❌❌ {self.symbol} {self.exchange_pair} 交易进程结束, 错误内容: {e}\n"
+                             f"错误详情:\n{traceback.format_exc()}")
                 await async_notify_telegram(error_msg)
                 break
 
@@ -1052,7 +1096,7 @@ class RealtimeHedgeEngine:
             # 做多
             side = TradeSide.BUY
         use_exchange, other_exchange = (self.exchange1, self.exchange2) if self._position1.position_side != side else (self.exchange2, self.exchange1)
-        mid_price = use_exchange.get_tick_price(self.symbol)
+        mid_price = await use_exchange.get_tick_price(self.symbol)
         trade_amt = abs(imbalance_amt)
         if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit:
             try:
@@ -1064,7 +1108,7 @@ class RealtimeHedgeEngine:
                 text = (f"⚠️ {self._position1.pair}({use_exchange.exchange_code}) {side} "
                         f"自动平衡仓位, 减仓:  {imbalance_amt} ${imbalance_value:.4f}")
             except Exception as e:
-                other_exchange.make_new_order(self.trade_config.pair2,
+                await other_exchange.make_new_order(self.trade_config.pair2,
                                               side,
                                               order_type="MARKET",
                                               quantity=trade_amt, price=mid_price)

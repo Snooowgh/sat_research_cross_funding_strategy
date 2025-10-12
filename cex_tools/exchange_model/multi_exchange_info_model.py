@@ -348,6 +348,7 @@ class MultiExchangeCombinedInfoModel:
                     max_open_notional_value = ex.max_open_notional_value()
                 else:
                     max_open_notional_value = min(max_open_notional_value, ex.max_open_notional_value())
+        return max_open_notional_value
 
     def __str__(self):
         """格式化输出多交易所综合信息"""
