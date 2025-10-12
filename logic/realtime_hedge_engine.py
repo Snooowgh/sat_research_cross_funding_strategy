@@ -694,7 +694,7 @@ class RealtimeHedgeEngine:
         except Exception as e:
             if "用户终止交易" not in str(e):
                 logger.error(f"❌ 交易执行异常: {e}")
-                logger.exception(e)
+                raise e
 
     async def _place_order_exchange1(self, pair: str, side: str, amount: float, price: float, reduceOnly):
         """在交易所1下单（异步接口）"""
@@ -1027,11 +1027,12 @@ class RealtimeHedgeEngine:
                     self._last_trade_time = time.time()
 
             except Exception as e:
-                logger.error(f"❌ 交易循环异常: {e}")
+                error_msg = f"❌❌❌ {self.symbol} {self.exchange_pair} 交易进程结束, 错误内容: {e}"
+                await async_notify_telegram(error_msg)
                 break
 
         logger.info(
-            f"🏁 交易完成: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
+            f"🏁 交易进程结束: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
         await self._auto_balance_position()
 
     async def _auto_balance_position(self):
