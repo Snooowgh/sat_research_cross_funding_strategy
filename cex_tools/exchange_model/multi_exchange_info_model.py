@@ -33,6 +33,9 @@ class SingleExchangeInfoModel:
         self.danger_maintenance_margin_ratio = 0.5
         self.danger_margin_usage_ratio = 0.70
 
+        self.force_reduce_leverage = 10
+        self.force_reduce_maintenance_margin_ratio = 0.9
+
         # 账户资金信息
         self.total_margin = 0
         self.available_margin = 0
@@ -101,6 +104,10 @@ class SingleExchangeInfoModel:
         if self.cross_margin_usage >= self.danger_margin_usage_ratio:
             return True, f"{self.exchange_code}保证金使用比例过高: {self.cross_margin_usage:.2%}"
         return False, ""
+
+    def should_force_reduce(self):
+        return (self.leverage >= self.force_reduce_leverage or
+                self.maintenance_margin_ratio >= self.force_reduce_maintenance_margin_ratio)
 
     def __str__(self):
         """格式化输出交易所信息"""
@@ -306,6 +313,9 @@ class MultiExchangeCombinedInfoModel:
                 total_should = True
                 total_msg += msg + "\n"
         return total_should, total_msg
+
+    def should_force_reduce(self):
+        pass
 
     def __str__(self):
         """格式化输出多交易所综合信息"""

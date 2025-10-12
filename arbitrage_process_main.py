@@ -42,6 +42,14 @@ class EngineHealthMetrics:
     last_trade_time: Optional[float] = None
     memory_usage_mb: float = 0.0
 
+    # 交易统计数据
+    trade_count: int = 0  # 开仓信号数量
+    cumulative_volume: float = 0.0  # 累计成交额
+    average_trade_amount: float = 0.0  # 平均交易额
+    latest_ma_spread: float = 0.0  # 最新平均价差
+    latest_funding_rate_diff_apy: float = 0.0  # 最新费率差APY
+    last_restart_reason: Optional[str] = None  # 最后重启原因
+
 @dataclass
 class ManagerConfig:
     """管理器配置"""
@@ -62,6 +70,13 @@ class ManagerConfig:
     memory_limit_mb: float = 1000.0  # 内存限制(MB)
     no_trade_timeout_min: int = 30  # 无交易超时时间(分钟)
 
+    # 系统监控配置
+    enable_system_monitor: bool = True  # 是否启用系统监控
+    cpu_threshold: float = 90.0  # CPU使用率告警阈值(%)
+    memory_threshold: float = 85.0  # 内存使用率告警阈值(%)
+    disk_threshold: float = 90.0  # 磁盘使用率告警阈值(%)
+    error_log_retention_count: int = 10  # 错误日志保留数量
+
 
 async def create_stream_for_exchange(exchange_code: str, symbol: str):
     """为指定交易所创建WebSocket流 - 使用现有工厂类"""
@@ -78,6 +93,46 @@ async def create_stream_for_exchange(exchange_code: str, symbol: str):
     except Exception as e:
         logger.error(f"❌ 创建 {exchange_code} {symbol} WebSocket流失败: {e}")
         return None
+
+async def _update_shared_engine_stats(risk_data_dict: Dict, engine, engine_config: EngineConfig):
+    """更新共享字典中的引擎统计数据"""
+    try:
+        # 获取引擎统计信息
+        stats = engine.get_stats()
+
+        # 获取价差和费率信息
+        latest_ma_spread = 0.0
+        latest_funding_rate_diff_apy = 0.0
+
+        try:
+            # 获取最新价差统计
+            spread_stats, funding_rate1, funding_rate2 = await engine._get_pair_market_info()
+            if spread_stats:
+                latest_ma_spread = spread_stats.mean_spread
+            latest_funding_rate_diff_apy = funding_rate1 - funding_rate2
+        except Exception as e:
+            logger.debug(f"获取价差费率信息失败: {e}")
+
+        # 计算平均交易额
+        average_trade_amount = stats['cum_volume'] / stats['trade_count'] if stats['trade_count'] > 0 else 0.0
+
+        # 更新共享字典
+        if 'engine_stats' not in risk_data_dict:
+            risk_data_dict['engine_stats'] = {}
+
+        process_key = f"{engine_config.symbol}_{engine_config.exchange1_code}_{engine_config.exchange2_code}"
+        risk_data_dict['engine_stats'][process_key] = {
+            'trade_count': stats['trade_count'],
+            'cumulative_volume': stats['cum_volume'],
+            'average_trade_amount': average_trade_amount,
+            'latest_ma_spread': latest_ma_spread,
+            'latest_funding_rate_diff_apy': latest_funding_rate_diff_apy,
+            'update_time': time.time()
+        }
+
+    except Exception as e:
+        logger.debug(f"更新引擎统计数据失败: {e}")
+
 
 def run_real_engine_in_process(engine_config: EngineConfig,
                                risk_data_dict: Dict, stop_event):
@@ -147,6 +202,7 @@ def run_real_engine_in_process(engine_config: EngineConfig,
             await engine.start()
 
             # 运行直到收到停止信号
+            last_stats_update = time.time()
             while not stop_event.is_set():
                 # 使用更短的睡眠以便更快响应停止信号
                 try:
@@ -157,6 +213,12 @@ def run_real_engine_in_process(engine_config: EngineConfig,
                 # 定期更新风控数据
                 if 'risk_data' in risk_data_dict:
                     engine.exchange_combined_info_cache = risk_data_dict['risk_data']
+
+                # 定期更新交易统计数据到共享字典
+                current_time = time.time()
+                if current_time - last_stats_update > 10:  # 每10秒更新一次
+                    await _update_shared_engine_stats(risk_data_dict, engine, engine_config)
+                    last_stats_update = current_time
 
             logger.info(f"🛑 {engine_config.symbol} 引擎收到停止信号，正在停止...")
             # 停止引擎（添加超时控制）
@@ -222,6 +284,10 @@ class MultiProcessArbitrageManager:
             'total_engines_started': 0,
             'total_engine_restarts': 0
         }
+
+        # 错误收集系统
+        self.error_logs = []  # 存储最近的错误日志
+        self.system_stats = {}  # 系统统计信息
 
     async def initialize(self):
         """初始化管理器"""
@@ -451,6 +517,10 @@ class MultiProcessArbitrageManager:
                 health_metrics.consecutive_failures += 1
                 health_metrics.is_healthy = False
                 failed_processes.append(process_key)
+
+                # 记录进程崩溃
+                self._add_error_log("ENGINE_CRASH",
+                                 f"{process_key} 进程崩溃，退出码: {process.exitcode}", process_key)
                 continue
 
             # 2. 检查内存使用
@@ -474,7 +544,10 @@ class MultiProcessArbitrageManager:
                 if time_since_trade > self.config.no_trade_timeout_min * 60:
                     logger.warning(f"⚠️  {process_key} 长时间无交易活动: {time_since_trade/60:.1f}分钟")
 
-            # 5. 更新健康状态
+            # 5. 收集交易数据
+            await self._collect_engine_trade_data(process_key)
+
+            # 6. 更新健康状态
             if process.is_alive() and process_key not in unhealthy_processes:
                 health_metrics.is_healthy = True
 
@@ -483,6 +556,52 @@ class MultiProcessArbitrageManager:
 
         # 处理不健康进程
         await self._handle_unhealthy_processes(unhealthy_processes)
+
+        # 检查系统负载情况
+        await self._check_system_load()
+
+    async def _check_system_load(self):
+        """检查系统负载并发送告警"""
+        if not self.config.enable_system_monitor:
+            return
+
+        try:
+            system_stats = await self._get_system_stats()
+            if not system_stats:
+                return
+
+            # CPU使用率检查
+            if system_stats['cpu_percent'] > self.config.cpu_threshold:
+                self._add_error_log("HIGH_CPU_USAGE",
+                                 f"CPU使用率过高: {system_stats['cpu_percent']:.1f}%")
+
+            # 内存使用率检查
+            if system_stats['memory_percent'] > self.config.memory_threshold:
+                self._add_error_log("HIGH_MEMORY_USAGE",
+                                 f"内存使用率过高: {system_stats['memory_percent']:.1f}%")
+
+            # 磁盘使用率检查
+            if system_stats['disk_percent'] > self.config.disk_threshold:
+                self._add_error_log("HIGH_DISK_USAGE",
+                                 f"磁盘使用率过高: {system_stats['disk_percent']:.1f}%")
+
+            # 系统负载检查（Unix系统）
+            if system_stats['load_1min'] > 0:
+                cpu_count = 4  # 假设4核CPU，实际应该获取真实值
+                try:
+                    import psutil
+                    cpu_count = psutil.cpu_count()
+                except Exception:
+                    pass
+
+                load_per_cpu = system_stats['load_1min'] / cpu_count
+                if load_per_cpu > 2.0:  # 每个CPU核心负载超过2.0
+                    self._add_error_log("HIGH_SYSTEM_LOAD",
+                                     f"系统负载过高: {system_stats['load_1min']:.2f} (每核心: {load_per_cpu:.2f})")
+
+        except Exception as e:
+            logger.error(f"检查系统负载失败: {e}")
+            self._add_error_log("SYSTEM_MONITOR_ERROR", f"系统监控异常: {str(e)}")
 
     async def _get_process_memory_usage(self, pid: int) -> float:
         """获取进程内存使用量(MB)"""
@@ -497,6 +616,120 @@ class MultiProcessArbitrageManager:
         except Exception:
             return 0.0
 
+    async def _get_system_stats(self) -> dict:
+        """获取系统负载情况"""
+        if not self.config.enable_system_monitor:
+            return {}
+
+        try:
+            import psutil
+
+            # CPU使用率
+            cpu_percent = psutil.cpu_percent(interval=1)
+
+            # 内存使用情况
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+
+            # 磁盘使用情况
+            disk = psutil.disk_usage('/')
+            disk_percent = disk.percent
+
+            # 系统负载（Unix系统）
+            try:
+                load_avg = psutil.getloadavg()
+                load_1min, load_5min, load_15min = load_avg
+            except (AttributeError, OSError):
+                # Windows系统不支持
+                load_1min = load_5min = load_15min = 0
+
+            # 网络IO
+            try:
+                net_io = psutil.net_io_counters()
+                bytes_sent = net_io.bytes_sent
+                bytes_recv = net_io.bytes_recv
+            except Exception:
+                bytes_sent = bytes_recv = 0
+
+            stats = {
+                'cpu_percent': cpu_percent,
+                'memory_percent': memory_percent,
+                'disk_percent': disk_percent,
+                'load_1min': load_1min,
+                'load_5min': load_5min,
+                'load_15min': load_15min,
+                'bytes_sent': bytes_sent,
+                'bytes_recv': bytes_recv,
+                'timestamp': time.time()
+            }
+
+            self.system_stats = stats
+            return stats
+
+        except ImportError:
+            logger.warning("psutil未安装，无法获取系统监控信息")
+            return {}
+        except Exception as e:
+            logger.error(f"获取系统统计信息失败: {e}")
+            return {}
+
+    def _add_error_log(self, error_type: str, message: str, process_key: str = None):
+        """添加错误日志到收集系统"""
+        error_entry = {
+            'timestamp': time.time(),
+            'error_type': error_type,
+            'message': message,
+            'process_key': process_key
+        }
+
+        self.error_logs.append(error_entry)
+
+        # 保持错误日志数量在限制范围内
+        if len(self.error_logs) > self.config.error_log_retention_count:
+            self.error_logs = self.error_logs[-self.config.error_log_retention_count:]
+
+        # 如果是严重错误，立即发送通知
+        if error_type in ['ENGINE_CRASH', 'SYSTEM_ERROR', 'RESTART_FAILED']:
+            asyncio.create_task(self._send_error_alert(error_entry))
+
+    async def _send_error_alert(self, error_entry: dict):
+        """发送错误告警通知"""
+        try:
+            timestamp = time.strftime('%H:%M:%S', time.localtime(error_entry['timestamp']))
+            process_info = f" ({error_entry['process_key']})" if error_entry['process_key'] else ""
+
+            message = (
+                f"🚨 系统错误告警\n"
+                f"⏰ 时间: {timestamp}\n"
+                f"🏷️ 类型: {error_entry['error_type']}\n"
+                f"📍 进程: {process_info}\n"
+                f"📝 详情: {error_entry['message']}"
+            )
+
+            await async_notify_telegram(message, channel_type=CHANNEL_TYPE.TRADE)
+
+        except Exception as e:
+            logger.error(f"发送错误告警失败: {e}")
+
+    async def _collect_engine_trade_data(self, process_key: str):
+        """收集引擎交易数据（通过共享内存或日志分析）"""
+        try:
+            # 这里尝试从共享字典中获取交易数据
+            # 如果引擎进程有更新共享数据的话
+            if 'engine_stats' in self.shared_risk_data:
+                engine_stats = self.shared_risk_data['engine_stats']
+                if process_key in engine_stats:
+                    stats = engine_stats[process_key]
+                    health_metrics = self.engine_health.get(process_key)
+                    if health_metrics:
+                        health_metrics.trade_count = stats.get('trade_count', 0)
+                        health_metrics.cumulative_volume = stats.get('cumulative_volume', 0.0)
+                        health_metrics.average_trade_amount = stats.get('average_trade_amount', 0.0)
+                        health_metrics.latest_ma_spread = stats.get('latest_ma_spread', 0.0)
+                        health_metrics.latest_funding_rate_diff_apy = stats.get('latest_funding_rate_diff_apy', 0.0)
+        except Exception as e:
+            logger.error(f"收集引擎交易数据失败 {process_key}: {e}")
+
     async def _handle_failed_processes(self, failed_processes: List[str]):
         """处理失败进程的智能重启"""
         for process_key in failed_processes:
@@ -504,9 +737,17 @@ class MultiProcessArbitrageManager:
             if not health_metrics:
                 continue
 
+            # 获取进程退出码和重启原因
+            process = self.engine_processes.get(process_key)
+            exit_code = process.exitcode if process else "unknown"
+            restart_reason = f"进程异常退出 (退出码: {exit_code})"
+
             # 检查是否应该重启
             if not self._should_restart_engine(health_metrics):
                 logger.error(f"❌ {process_key} 不再重启，已达到最大尝试次数")
+                health_metrics.last_restart_reason = f"{restart_reason} - 达到最大重启次数"
+                self._add_error_log("MAX_RESTART_REACHED",
+                                 f"{process_key} 达到最大重启次数，不再重启", process_key)
                 continue
 
             try:
@@ -529,13 +770,22 @@ class MultiProcessArbitrageManager:
                 health_metrics.restart_count += 1
                 health_metrics.consecutive_failures = 0
                 health_metrics.start_time = time.time()
+                health_metrics.last_restart_reason = restart_reason
 
                 self.stats['total_engine_restarts'] += 1
                 logger.success(f"✅ {process_key} 引擎进程重启成功")
 
+                # 记录重启通知
+                self._add_error_log("ENGINE_RESTART",
+                                 f"{process_key} 重启成功 (第{health_metrics.restart_count}次) - 原因: {restart_reason}",
+                                 process_key)
+
             except Exception as e:
                 logger.error(f"❌ 重启 {process_key} 引擎进程失败: {e}")
                 health_metrics.consecutive_failures += 1
+                health_metrics.last_restart_reason = f"重启失败: {str(e)}"
+                self._add_error_log("RESTART_FAILED",
+                                 f"{process_key} 重启失败: {str(e)}", process_key)
 
     async def _handle_unhealthy_processes(self, unhealthy_processes: List[str]):
         """处理不健康的进程"""
@@ -601,14 +851,7 @@ class MultiProcessArbitrageManager:
             avg_memory = sum(h.memory_usage_mb for h in self.engine_health.values()) / len(self.engine_health) if self.engine_health else 0
             max_restarts = max((h.restart_count for h in self.engine_health.values()), default=0)
 
-            # 获取引擎详情
-            engine_details = []
-            for process_key, health in list(self.engine_health.items())[:5]:  # 只显示前5个
-                status_emoji = "✅" if health.is_healthy else "❌"
-                memory_str = f"{health.memory_usage_mb:.0f}MB" if health.memory_usage_mb > 0 else "N/A"
-                restart_str = f"({health.restart_count}重启)" if health.restart_count > 0 else ""
-                engine_details.append(f"{status_emoji} {process_key} {memory_str} {restart_str}")
-
+            # 构建基础信息
             message = (
                 f"📊 套利管理器智能状态报告\n"
                 f"🤖 活跃引擎: {active_count} (健康: {healthy_count})\n"
@@ -619,15 +862,83 @@ class MultiProcessArbitrageManager:
                 f"⏱️  运行时长: {int((time.time() - self.stats.get('start_time', time.time())) / 60)}分钟\n"
             )
 
+            # 添加系统负载信息
+            if self.system_stats:
+                stats = self.system_stats
+                message += (
+                    f"\n💻 系统负载:\n"
+                    f"   CPU: {stats['cpu_percent']:.1f}% | 内存: {stats['memory_percent']:.1f}% | 磁盘: {stats['disk_percent']:.1f}%\n"
+                )
+                if stats['load_1min'] > 0:
+                    message += f"   负载: {stats['load_1min']:.2f}/{stats['load_5min']:.2f}/{stats['load_15min']:.2f}\n"
+
+            # 获取详细的引擎交易数据
+            engine_details = []
+            total_trades = 0
+            total_volume = 0.0
+            engines_with_trades = 0
+
+            for process_key, health in list(self.engine_health.items())[:8]:  # 显示前8个引擎
+                status_emoji = "✅" if health.is_healthy else "❌"
+                memory_str = f"{health.memory_usage_mb:.0f}MB" if health.memory_usage_mb > 0 else "N/A"
+                restart_str = f"({health.restart_count}重启)" if health.restart_count > 0 else ""
+
+                # 交易数据
+                trade_info = ""
+                if health.trade_count > 0:
+                    engines_with_trades += 1
+                    total_trades += health.trade_count
+                    total_volume += health.cumulative_volume
+                    avg_trade = health.average_trade_amount if health.average_trade_amount > 0 else (health.cumulative_volume / health.trade_count)
+                    trade_info = f" 📈{health.trade_count}笔 ${avg_trade:.0f}"
+
+                    # 添加价差和费率信息
+                    if health.latest_ma_spread != 0:
+                        trade_info += f" 价差:{health.latest_ma_spread:.4%}"
+                    if health.latest_funding_rate_diff_apy != 0:
+                        trade_info += f" 费率:{health.latest_funding_rate_diff_apy:.2%}apy"
+                else:
+                    trade_info = " 📭无交易"
+
+                # 添加重启原因（如果有）
+                restart_reason = f" | {health.last_restart_reason}" if health.last_restart_reason else ""
+
+                engine_details.append(
+                    f"{status_emoji} {process_key} {memory_str}{restart_str}{trade_info}{restart_reason}"
+                )
+
+            # 添加交易统计汇总
+            if engines_with_trades > 0:
+                avg_trade_all = total_volume / total_trades if total_trades > 0 else 0
+                message += (
+                    f"\n📈 交易统计汇总:\n"
+                    f"   总交易: {total_trades}笔 | 总成交额: ${total_volume:.0f}\n"
+                    f"   平均交易额: ${avg_trade_all:.0f} | 活跃引擎: {engines_with_trades}/{len(self.engine_health)}\n"
+                )
+
+            # 添加引擎详情
             if engine_details:
                 message += f"\n🔍 引擎详情:\n" + "\n".join(engine_details)
 
+            # 添加最近的错误信息
+            if self.error_logs:
+                recent_errors = self.error_logs[-3:]  # 显示最近3个错误
+                error_summary = []
+                for error in recent_errors:
+                    timestamp = time.strftime('%H:%M:%S', time.localtime(error['timestamp']))
+                    process_info = f"[{error['process_key']}]" if error['process_key'] else ""
+                    error_summary.append(f"   {timestamp} {process_info} {error['error_type']}: {error['message']}")
+
+                message += f"\n⚠️  最近错误:\n" + "\n".join(error_summary)
+
+            # 发送通知
             await async_notify_telegram(message, channel_type=CHANNEL_TYPE.QUIET)
             await async_notify_telegram(str(self.cached_risk_data), channel_type=CHANNEL_TYPE.QUIET)
             self.last_notify_time = current_time
 
         except Exception as e:
             logger.error(f"❌ 发送通知失败: {e}")
+            self._add_error_log("NOTIFICATION_ERROR", f"发送状态通知失败: {str(e)}")
 
     async def run(self):
         """运行管理器主循环"""

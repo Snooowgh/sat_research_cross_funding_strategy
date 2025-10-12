@@ -105,7 +105,7 @@ class TradeSignal:
     def __str__(self):
         return (f"TradeSignal(pair1={self.pair1}, side1={self.side1}, price1={self.price1}, price2={self.price2}, "
                 f"spread_rate={self.spread_rate:.4%}, optimal_spread={self.optimal_spread:.4%}, z_score={self.z_score:.2f}, "
-                f"z_score_after_fee={self.z_score_after_fee:.2f},funding_rate_diff_apy={self.funding_rate_diff_apy:.2%}"
+                f"z_score_after_fee={self.z_score_after_fee:.2f},funding_rate_diff_apy={self.funding_rate_diff_apy:.2%}, "
                 f"risk_check_passed={self.pass_risk_check}, risk_message='{self.risk_message}', "
                 f"_is_add_position={self._is_add_position}, "
                 f"delay={self.delay_ms():.2f}ms)")
@@ -582,7 +582,7 @@ class RealtimeHedgeEngine:
                     return False, f"动态收益率不足 ({signal.spread_rate:.4%} < {signal.optimal_min_spread_profit_rate:.4%})"
 
         if self.trade_config.daemon_mode and not signal.is_zscore_triggered():
-            return False, f"zscore收益率不足, Z-Score:{signal.z_score:.2f}"
+            return False, f"zscore收益率不足, Z-Score:{signal.z_score_after_fee:.2f}"
 
         return True, "风控检查通过"
 
