@@ -149,6 +149,19 @@ class AsyncExchangeAdapter:
         """获取资金费率"""
         return await self._call_method('get_funding_rate', symbol, apy)
 
+    async def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                      start_time: int = None, end_time: int = None,
+                                      apy: bool = True):
+        """获取交易品种的历史资金费率"""
+        return await self._call_method('get_funding_rate_history',
+                                     symbol, limit, start_time, end_time, apy)
+
+    async def get_funding_history(self, symbol: str = None, limit: int = 100,
+                                 start_time: int = None, end_time: int = None):
+        """获取用户仓位收取的资金费历史记录"""
+        return await self._call_method('get_funding_history',
+                                     symbol, limit, start_time, end_time)
+
     async def set_leverage(self, symbol: str, leverage: int) -> bool:
         """设置杠杆"""
         return await self._call_method('set_leverage', symbol, leverage)
@@ -237,6 +250,7 @@ async def example_usage():
     """使用示例"""
     from cex_tools.binance_future import BinanceFuture
     from cex_tools.lighter_future import LighterFuture
+    import time
 
     # 创建同步交易所
     binance = BinanceFuture(key="...", secret="...")
@@ -269,6 +283,109 @@ async def example_usage():
         )
 
         print(f"保证金: {margins}")
+
+        # ========== 新增：历史资金费率示例 ==========
+
+        # 获取当前资金费率
+        current_rates = await asyncio.gather(
+            async_binance.get_funding_rate("BTCUSDT", apy=True),
+            async_lighter.get_funding_rate("BTC", apy=True)
+        )
+
+        print(f"当前年化资金费率:")
+        print(f"  Binance: {current_rates[0]:.4%}")
+        print(f"  Lighter: {current_rates[1]:.4%}")
+
+        # 获取历史资金费率数据
+        end_time = int(time.time() * 1000)
+        start_time = end_time - (7 * 24 * 60 * 60 * 1000)  # 7天前
+
+        rate_histories = await asyncio.gather(
+            async_binance.get_funding_rate_history(
+                symbol="BTCUSDT",
+                limit=20,
+                start_time=start_time,
+                end_time=end_time,
+                apy=True
+            ),
+            async_lighter.get_funding_rate_history(
+                symbol="BTC",
+                limit=20,
+                start_time=start_time,
+                end_time=end_time,
+                apy=True
+            )
+        )
+
+        print(f"\n历史资金费率分析 (最近7天):")
+        for i, (exchange, history) in enumerate([("Binance", rate_histories[0]), ("Lighter", rate_histories[1])]):
+            if history and history.data:
+                latest = history.get_latest_rate()
+                avg_rate = history.get_average_rate(annualized=True)
+                print(f"  {exchange}:")
+                print(f"    最新费率: {latest.annualized_rate_percentage}")
+                print(f"    平均费率: {avg_rate:.4%}")
+                print(f"    数据条数: {len(history.data)}")
+            else:
+                print(f"  {exchange}: 无历史数据")
+
+        # 获取用户资金费历史
+        funding_histories = await asyncio.gather(
+            async_binance.get_funding_history(
+                symbol="BTCUSDT",
+                limit=10,
+                start_time=start_time,
+                end_time=end_time
+            ),
+            async_lighter.get_funding_history(
+                symbol="BTC",
+                limit=10,
+                start_time=start_time,
+                end_time=end_time
+            )
+        )
+
+        print(f"\n用户资金费历史 (最近7天):")
+        for i, (exchange, history) in enumerate([("Binance", funding_histories[0]), ("Lighter", funding_histories[1])]):
+            if history and history.data:
+                total_received = history.get_total_received()
+                total_paid = history.get_total_paid()
+                net_amount = total_received + total_paid
+                print(f"  {exchange}:")
+                print(f"    总收到: {total_received:.4f} USDT")
+                print(f"    总支付: {abs(total_paid):.4f} USDT")
+                print(f"    净金额: {net_amount:+.4f} USDT")
+                print(f"    记录条数: {len(history.data)}")
+            else:
+                print(f"  {exchange}: 无资金费记录")
+
+        # ========== 跨交易所资金费率对比 ==========
+        print(f"\n跨交易所资金费率对比:")
+
+        # 获取多个交易所的当前资金费率进行对比
+        symbols = ["BTCUSDT", "ETHUSDT"]
+        for symbol in symbols:
+            try:
+                lighter_symbol = symbol.replace("USDT", "")
+
+                rates = await asyncio.gather(
+                    async_binance.get_funding_rate(symbol, apy=True),
+                    async_lighter.get_funding_rate(lighter_symbol, apy=True)
+                )
+
+                binance_rate, lighter_rate = rates
+                difference = abs(binance_rate - lighter_rate)
+
+                print(f"  {symbol}:")
+                print(f"    Binance: {binance_rate:.4%}")
+                print(f"    Lighter:  {lighter_rate:.4%}")
+                print(f"    差异:    {difference:.4%}")
+
+                if difference > 0.001:  # 0.1%差异
+                    print(f"    🚨 发现显著差异，可能存在套利机会!")
+
+            except Exception as e:
+                print(f"  {symbol}: 获取失败 - {e}")
 
     except Exception as e:
         logger.error(f"示例执行失败: {e}")

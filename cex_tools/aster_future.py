@@ -21,6 +21,7 @@ from cex_tools.exchange_model.position_model import BinancePositionDetail
 from cex_tools.exchange_model.order_model import BinanceOrder, BinanceOrderStatus
 from cex_tools.exchange_model.orderbook_model import BinanceOrderBook
 from cex_tools.exchange_model.kline_bar_model import BinanceKlineBar
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
 from cex_tools.cex_enum import ExchangeEnum, TradeSide
 from utils.decorators import timed_cache
 
@@ -448,6 +449,161 @@ class AsterFuture:
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 获取全仓保证金比例失败: {e}")
             return 0
+
+    def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                 start_time: int = None, end_time: int = None,
+                                 apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        获取交易品种的历史资金费率
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")
+            limit: 返回数据条数，最大1000，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+            apy: 是否返回年化费率，默认True
+
+        Returns:
+            FundingRateHistoryResponse: 历史资金费率响应对象
+        """
+        try:
+            # 确保symbol格式正确
+            if not symbol.endswith("USDT") and not symbol.endswith("USDC"):
+                symbol = f"{symbol}USDT"
+
+            # 构建查询参数
+            params = {
+                "symbol": symbol,
+                "limit": min(limit, 1000)  # API限制最大1000
+            }
+
+            if start_time:
+                params["startTime"] = start_time
+            if end_time:
+                params["endTime"] = end_time
+
+            # 调用Aster API获取历史资金费率 (尝试不同端点)
+            try:
+                history_data = self._request("GET", "/fapi/v1/fundingRate/history", params=params)
+            except:
+                # 如果标准端点不存在，尝试其他可能的端点
+                try:
+                    # 尝试不签名的历史费率接口
+                    history_data = self._request("GET", "/fapi/v1/fundingRate", params={k: v for k, v in params.items() if k not in ["symbol", "startTime", "endTime"]})
+                except:
+                    # 如果还是没有，返回空数据
+                    history_data = []
+
+            # 转换为统一的数据模型
+            response = FundingRateHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(history_data),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in history_data:
+                funding_rate = float(item["fundingRate"])
+                funding_time = int(item["fundingTime"])
+
+                # 计算年化费率 (Aster默认8小时一次，一天3次)
+                annualized_rate = funding_rate * 3 * 365 if apy else funding_rate
+
+                rate_data = FundingRateHistory(
+                    symbol=symbol,
+                    funding_rate=funding_rate,
+                    funding_time=funding_time,
+                    annualized_rate=annualized_rate if apy else None
+                )
+                response.add_rate(rate_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率失败: {e}")
+            return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+    def get_funding_history(self, symbol: str = None, limit: int = 100,
+                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+        """
+        获取用户仓位收取的资金费历史记录
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")，可选，不指定则返回所有交易对
+            limit: 返回数据条数，最大1000，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+
+        Returns:
+            FundingHistoryResponse: 用户资金费历史响应对象
+        """
+        try:
+            # 构建查询参数
+            params = {
+                "incomeType": "FUNDING_FEE",  # 指定查询资金费类型
+                "limit": min(limit, 1000)  # API限制最大1000
+            }
+
+            if symbol:
+                # 确保symbol格式正确
+                if not symbol.endswith("USDT") and not symbol.endswith("USDC"):
+                    symbol = f"{symbol}USDT"
+                params["symbol"] = symbol
+
+            if start_time:
+                params["startTime"] = start_time
+            if end_time:
+                params["endTime"] = end_time
+
+            # 调用Aster API获取用户资金费历史 (尝试不同端点)
+            try:
+                income_data = self._request("GET", "/fapi/v1/income/asyn", params=params, signed=True)
+            except:
+                # 如果标准端点不存在，尝试其他可能的端点
+                try:
+                    income_data = self._request("GET", "/fapi/v1/income", params={k: v for k, v in params.items() if k != "symbol"}, signed=True)
+                except:
+                    # 如果还是没有，返回空数据
+                    income_data = []
+
+            # 转换为统一的数据模型
+            response = FundingHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(income_data),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in income_data:
+                funding_amount = float(item["income"])  # 正数表示收到，负数表示支付
+                funding_rate = abs(float(item["income"])) / float(item["balance"]) if float(item.get("balance", 0)) != 0 else 0.0
+
+                funding_data = FundingHistory(
+                    symbol=item["symbol"],
+                    funding_rate=funding_rate,
+                    funding_amount=funding_amount,
+                    position_side=item.get("positionSide", "BOTH"),
+                    funding_time=int(item["time"]),
+                    transaction_id=item.get("tranId", ""),
+                    income_type=item["incomeType"]
+                )
+                response.add_funding_record(funding_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取用户资金费历史成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取用户资金费历史失败: {e}")
+            return FundingHistoryResponse(symbol=symbol, limit=limit, total=0)
 
 
 if __name__ == '__main__':

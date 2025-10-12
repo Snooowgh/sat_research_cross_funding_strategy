@@ -76,6 +76,7 @@ class TradeSignal:
     optimal_spread: float  # 价差
     spread_rate: float  # 价差收益率
     timestamp: float
+    funding_rate_diff_apy: float
     z_score: float = None
     z_score_after_fee: float = None
     zscore_threshold: float = 2
@@ -104,7 +105,7 @@ class TradeSignal:
     def __str__(self):
         return (f"TradeSignal(pair1={self.pair1}, side1={self.side1}, price1={self.price1}, price2={self.price2}, "
                 f"spread_rate={self.spread_rate:.4%}, optimal_spread={self.optimal_spread:.4%}, z_score={self.z_score:.2f}, "
-                f"z_score_after_fee={self.z_score_after_fee:.2f},"
+                f"z_score_after_fee={self.z_score_after_fee:.2f},funding_rate_diff_apy={self.funding_rate_diff_apy:.2%}"
                 f"risk_check_passed={self.pass_risk_check}, risk_message='{self.risk_message}', "
                 f"_is_add_position={self._is_add_position}, "
                 f"delay={self.delay_ms():.2f}ms)")
@@ -265,16 +266,12 @@ class RealtimeHedgeEngine:
 
         return True, f"流动性充足 (${liquidity1:.0f}/${liquidity2:.0f})"
 
-    async def _calculate_zscore(self) -> float:
-        """计算当前Z-Score"""
-        spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
-        # 计算当前价差（包含资金费率）
-        current_spread = (self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) / self._latest_orderbook2.mid_price
-        # 计算Z-Score
-        z_score = calculate_zscore(current_spread, spread_stats, funding_rate1, funding_rate2, side1=None, fee_rate=None)
-        optimal_spread = infer_optimal_spread_by_zscore(self.trade_config.zscore_threshold, spread_stats,
-                                                        funding_rate1, funding_rate2)
-        return z_score, optimal_spread
+    def get_current_spread(self):
+        if not self._latest_orderbook1 or not self._latest_orderbook2:
+            return None
+        current_spread = ((self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) /
+                          self._latest_orderbook2.mid_price)
+        return current_spread
 
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
         """
@@ -285,13 +282,17 @@ class RealtimeHedgeEngine:
 
         :return: 交易信号
         """
-        if not self._latest_orderbook1 or not self._latest_orderbook2:
+        current_spread = self.get_current_spread()
+        if current_spread is None:
             return None
         # 仓位数据
         pos1, pos2 = self._position1, self._position2
+        spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
         # 计算Z-Score
-        z_score, optimal_spread = await self._calculate_zscore()
-
+        z_score = calculate_zscore(current_spread, spread_stats, funding_rate1, funding_rate2, side1=None,
+                                   fee_rate=None)
+        optimal_spread = infer_optimal_spread_by_zscore(self.trade_config.zscore_threshold, spread_stats,
+                                                        funding_rate1, funding_rate2)
         # Z-Score分析
         zscore_threshold = self.trade_config.zscore_threshold
         if self._can_add_position():
@@ -311,12 +312,10 @@ class RealtimeHedgeEngine:
             optimal_side1 = TradeSide.BUY if pos1.position_side == TradeSide.SELL else TradeSide.SELL
             optimal_side2 = TradeSide.BUY if pos2.position_side == TradeSide.SELL else TradeSide.SELL
 
-        spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
-        # 计算当前价差（包含资金费率）
-        current_spread = (self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) / self._latest_orderbook2.mid_price
         # 计算Z-Score
         z_score_after_fee = calculate_zscore(current_spread, spread_stats, funding_rate1, funding_rate2,
                                              side1=optimal_side1, fee_rate=self.taker_fee_rate)
+        funding_rate_diff_apy = funding_rate1 - funding_rate2
         # 根据交易方向获取成交价格
         if optimal_side1 == TradeSide.BUY:
             price1 = self._latest_orderbook1.best_ask  # 买入取卖一价
@@ -354,6 +353,7 @@ class RealtimeHedgeEngine:
             z_score=z_score,
             z_score_after_fee=z_score_after_fee,
             optimal_spread=optimal_spread,
+            funding_rate_diff_apy=funding_rate_diff_apy,
             zscore_threshold=zscore_threshold
         )
         # 根据仓位情况判断是什么操作
@@ -371,7 +371,8 @@ class RealtimeHedgeEngine:
         计算价差和交易信号(命令行模式下 只有一个交易方向)
         :return: 交易信号
         """
-        if not self._latest_orderbook1 or not self._latest_orderbook2:
+        current_spread = self.get_current_spread()
+        if current_spread is None:
             return None
 
         # 根据交易方向获取价格
@@ -397,7 +398,13 @@ class RealtimeHedgeEngine:
         else:
             # 做空exchange1，做多exchange2，需要price1 > price2才有收益
             spread_rate = spread / price1
-        z_score, optimal_spread = await self._calculate_zscore()
+        spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
+        # 计算Z-Score
+        z_score = calculate_zscore(current_spread, spread_stats, funding_rate1, funding_rate2, side1=None,
+                                   fee_rate=None)
+        optimal_spread = infer_optimal_spread_by_zscore(self.trade_config.zscore_threshold, spread_stats,
+                                                        funding_rate1, funding_rate2)
+        funding_rate_diff_apy = funding_rate1 - funding_rate2
         signal = TradeSignal(
             pair1=self.trade_config.pair1,
             pair2=self.trade_config.pair2,
@@ -409,7 +416,8 @@ class RealtimeHedgeEngine:
             spread_rate=spread_rate,
             timestamp=time.time(),
             z_score=z_score,
-            optimal_spread=optimal_spread
+            optimal_spread=optimal_spread,
+            funding_rate_diff_apy=funding_rate_diff_apy
         )
 
         return signal

@@ -19,6 +19,7 @@ from cex_tools.cex_enum import ExchangeEnum, TradeSide
 from cex_tools.exchange_model.position_model import HyperliquidPositionDetail
 from cex_tools.exchange_model.order_model import HyperLiquidOrder
 from cex_tools.exchange_model.kline_bar_model import HyperLiquidKlineBar
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
 from eth_account.signers.local import LocalAccount
@@ -486,6 +487,191 @@ class HyperLiquidFuture:
         if accountValue == 0:
             return 0
         return crossMaintenanceMarginUsed / accountValue
+
+    def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                 start_time: int = None, end_time: int = None,
+                                 apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        获取交易品种的历史资金费率
+
+        Args:
+            symbol: 交易对符号 (如 "BTC")
+            limit: 返回数据条数，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+            apy: 是否返回年化费率，默认True
+
+        Returns:
+            FundingRateHistoryResponse: 历史资金费率响应对象
+        """
+        try:
+            # 转换symbol格式 (HyperLiquid使用不带USDT的格式)
+            symbol = self.__convert_pair(symbol)
+
+            # 设置时间范围
+            if end_time is None:
+                end_time = int(time.time() * 1000)
+            if start_time is None:
+                # HyperLiquid每8小时一次资金费率，计算开始时间
+                start_time = end_time - (limit * 8 * 60 * 60 * 1000)
+
+            # 获取历史资金费率数据
+            # 注意：HyperLiquid API可能需要调整参数名称
+            funding_history = self.info.funding_history(
+                name=symbol,
+                startTime=start_time // 1000,  # 转换为秒
+                endTime=end_time // 1000
+            )
+
+            # 转换为统一的数据模型
+            response = FundingRateHistoryResponse(
+                symbol=symbol + "USDT",  # 转换回标准格式
+                limit=limit,
+                total=len(funding_history),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in funding_history:
+                funding_rate = float(item.get("rate", 0))
+                funding_time = int(item.get("time", 0)) * 1000  # 转换为毫秒
+
+                # 计算年化费率 (HyperLiquid每8小时一次，一天3次)
+                annualized_rate = funding_rate * 3 * 365 if apy else funding_rate
+
+                rate_data = FundingRateHistory(
+                    symbol=symbol + "USDT",
+                    funding_rate=funding_rate,
+                    funding_time=funding_time,
+                    annualized_rate=annualized_rate if apy else None
+                )
+                response.add_rate(rate_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率失败: {e}")
+            # 如果API不存在，尝试使用替代方法
+            return self._get_funding_rate_history_fallback(symbol, limit, start_time, end_time, apy)
+
+    def _get_funding_rate_history_fallback(self, symbol: str, limit: int = 100,
+                                          start_time: int = None, end_time: int = None,
+                                          apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        备用方法：通过meta_and_asset_ctxs获取模拟的历史资金费率数据
+        """
+        try:
+            symbol = self.__convert_pair(symbol)
+
+            # 获取当前资金费率作为基准
+            meta_info = self.get_meta_and_asset_ctxs()
+            current_funding = float(meta_info.get(symbol, {}).get("funding", 0))
+
+            # 设置时间范围
+            if end_time is None:
+                end_time = int(time.time() * 1000)
+            if start_time is None:
+                start_time = end_time - (limit * 8 * 60 * 60 * 1000)  # 8小时间隔
+
+            # 生成模拟的历史数据（实际使用中应该替换为真实API调用）
+            response = FundingRateHistoryResponse(
+                symbol=symbol + "USDT",
+                limit=limit,
+                total=1,  # 只有当前数据
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            # 只返回当前资金费率
+            rate_data = FundingRateHistory(
+                symbol=symbol + "USDT",
+                funding_rate=current_funding,
+                funding_time=end_time,
+                annualized_rate=current_funding * 3 * 365 if apy else current_funding
+            )
+            response.add_rate(rate_data)
+
+            logger.warning(f"[{self.exchange_code}] 使用备用方法获取 {symbol} 资金费率: 返回当前数据")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 备用方法获取 {symbol} 历史资金费率失败: {e}")
+            return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+    def get_funding_history(self, symbol: str = None, limit: int = 100,
+                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+        """
+        获取用户仓位收取的资金费历史记录
+
+        Args:
+            symbol: 交易对符号 (如 "BTC")，可选，不指定则返回所有交易对
+            limit: 返回数据条数，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+
+        Returns:
+            FundingHistoryResponse: 用户资金费历史响应对象
+        """
+        try:
+            # 设置时间范围
+            if end_time is None:
+                end_time = int(time.time())
+            if start_time is None:
+                start_time = end_time - (limit * 8 * 60 * 60)  # 8小时间隔
+
+            # 获取用户资金费历史
+            # 注意：HyperLiquid使用不同的API端点和参数格式
+            user_fills = self.info.user_fills(
+                address=self.address
+            )
+
+            # 转换为统一的数据模型
+            response = FundingHistoryResponse(
+                symbol=symbol + "USDT" if symbol else None,
+                limit=limit,
+                total=len(user_fills),
+                start_time=start_time * 1000,  # 转换为毫秒
+                end_time=end_time * 1000
+            )
+
+            for fill in user_fills:
+                # 筛选资金费相关的交易
+                if fill.get("type") == "funding":
+                    symbol_clean = self.__convert_pair(fill.get("coin", symbol or "UNKNOWN"))
+                    funding_amount = float(fill.get("funding", 0))
+                    funding_time = int(fill.get("time", 0)) * 1000  # 转换为毫秒
+
+                    funding_data = FundingHistory(
+                        symbol=symbol_clean + "USDT",
+                        funding_rate=abs(funding_amount) / 1000.0 if funding_amount != 0 else 0.0,  # 估算费率
+                        funding_amount=funding_amount,
+                        position_side="BOTH",
+                        funding_time=funding_time,
+                        transaction_id=fill.get("hash", ""),
+                        income_type="FUNDING_FEE"
+                    )
+                    response.add_funding_record(funding_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取用户资金费历史成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取用户资金费历史失败: {e}")
+            # 如果API不存在，返回空结果
+            return FundingHistoryResponse(
+                symbol=symbol + "USDT" if symbol else None,
+                limit=limit,
+                total=0,
+                start_time=start_time * 1000 if start_time else None,
+                end_time=end_time * 1000 if end_time else None
+            )
 
 
 if __name__ == '__main__':

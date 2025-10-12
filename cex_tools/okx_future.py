@@ -17,6 +17,7 @@ from cex_tools.exchange_model.position_model import OkxPositionDetail
 from cex_tools.exchange_model.order_model import OkxOrder
 from cex_tools.exchange_model.kline_bar_model import OkxKlineBar
 from cex_tools.exchange_model.orderbook_model import OkxOrderBook
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
 from utils.decorators import timed_cache
 from utils.notify_tools import send_slack_message
 from utils.parallelize_utils import parallelize_tasks
@@ -499,6 +500,162 @@ class OkxFuture:
         for info in deposit_history_list:
             amount += float(info["amt"])
         return amount
+
+    def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                 start_time: int = None, end_time: int = None,
+                                 apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        获取交易品种的历史资金费率
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")
+            limit: 返回数据条数，最大100，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+            apy: 是否返回年化费率，默认True
+
+        Returns:
+            FundingRateHistoryResponse: 历史资金费率响应对象
+        """
+        try:
+            # 转换为OKX格式
+            inst_id = self.convert_symbol(symbol)
+
+            # 构建查询参数
+            params = {
+                "instId": inst_id,
+                "limit": str(min(limit, 100))  # OKX API限制最大100
+            }
+
+            if start_time:
+                params["before"] = str(start_time // 1000)  # 转换为秒
+            if end_time:
+                params["after"] = str(end_time // 1000)  # 转换为秒
+
+            # 调用OKX API获取历史资金费率
+            funding_rate_data = self.ccxt_exchange.public_get_public_funding_rate_history(params=params)
+
+            # 转换为统一的数据模型
+            response = FundingRateHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(funding_rate_data.get("data", [])),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in funding_rate_data.get("data", []):
+                funding_rate = float(item.get("fundingRate", "0"))
+                funding_time = int(item.get("fundingTime", "0"))
+
+                # OKX已返回年化费率，但我们需要统一格式
+                if apy:
+                    annualized_rate = funding_rate / 100  # OKX返回的是百分比
+                else:
+                    # 计算单次费率 (OKX每8小时一次)
+                    annualized_rate = funding_rate / 100
+                    single_rate = annualized_rate / (365 * 3)  # 除以天数和每天次数
+                    funding_rate = single_rate
+
+                rate_data = FundingRateHistory(
+                    symbol=symbol,
+                    funding_rate=funding_rate if not apy else annualized_rate / (365 * 3),
+                    funding_time=funding_time,
+                    annualized_rate=annualized_rate if apy else None
+                )
+                response.add_rate(rate_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率失败: {e}")
+            return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+    def get_funding_history(self, symbol: str = None, limit: int = 100,
+                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+        """
+        获取用户仓位收取的资金费历史记录
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")，可选，不指定则返回所有交易对
+            limit: 返回数据条数，最大100，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+
+        Returns:
+            FundingHistoryResponse: 用户资金费历史响应对象
+        """
+        try:
+            # 构建查询参数
+            params = {
+                "instType": "SWAP",  # 永续合约
+                "type": "1",  # 资金费
+                "limit": str(min(limit, 100))  # OKX API限制最大100
+            }
+
+            if symbol:
+                params["instId"] = self.convert_symbol(symbol)
+
+            if start_time:
+                params["before"] = str(start_time // 1000)  # 转换为秒
+            if end_time:
+                params["after"] = str(end_time // 1000)  # 转换为秒
+
+            # 调用OKX API获取用户资金费历史
+            funding_history_data = self.ccxt_exchange.private_get_asset_bills(params=params)
+
+            # 转换为统一的数据模型
+            response = FundingHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(funding_history_data.get("data", [])),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in funding_history_data.get("data", []):
+                # 解析OKX的资金费记录
+                funding_amount = float(item.get("sz", "0"))  # 资金费金额
+                if item.get("ccy") == "USDT":
+                    funding_amount = float(item.get("sz", "0"))
+                else:
+                    # 如果不是USDT，可能需要转换
+                    funding_amount = float(item.get("pnl", "0"))
+
+                # 从交易记录中提取symbol
+                inst_id = item.get("instId", "")
+                if inst_id:
+                    # 转换OKX格式为标准格式
+                    clean_symbol = inst_id.replace("-SWAP", "").replace("-", "")
+                    if not clean_symbol.endswith("USDT"):
+                        clean_symbol += "USDT"
+                else:
+                    clean_symbol = symbol or "UNKNOWN"
+
+                funding_data = FundingHistory(
+                    symbol=clean_symbol,
+                    funding_rate=abs(funding_amount) / 1000.0 if funding_amount != 0 else 0.0,  # 估算费率
+                    funding_amount=funding_amount,
+                    position_side="BOTH",
+                    funding_time=int(item.get("ts", "0")),
+                    transaction_id=item.get("billId", ""),
+                    income_type="FUNDING_FEE"
+                )
+                response.add_funding_record(funding_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取用户资金费历史成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取用户资金费历史失败: {e}")
+            return FundingHistoryResponse(symbol=symbol, limit=limit, total=0)
 
 
 if __name__ == '__main__':

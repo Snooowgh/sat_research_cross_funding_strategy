@@ -17,6 +17,7 @@ from cex_tools.exchange_model.position_model import BybitPositionDetail
 from cex_tools.exchange_model.order_model import BybitOrder
 from cex_tools.exchange_model.kline_bar_model import BybitKlineBar
 from cex_tools.exchange_model.orderbook_model import BybitOrderBook
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
 from cex_tools.funding_rate_cache import FundingRateCache
 from utils.decorators import timed_cache
 from utils.notify_tools import send_slack_message
@@ -503,6 +504,150 @@ class BybitFuture(FutureExchange):
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 获取全仓保证金比例失败: {e}")
             return 0
+
+    def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                 start_time: int = None, end_time: int = None,
+                                 apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        获取交易品种的历史资金费率
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")
+            limit: 返回数据条数，最大200，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+            apy: 是否返回年化费率，默认True
+
+        Returns:
+            FundingRateHistoryResponse: 历史资金费率响应对象
+        """
+        try:
+            # 确保symbol格式正确
+            symbol = self.convert_symbol(symbol)
+
+            # 构建查询参数
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "limit": min(limit, 200)  # Bybit API限制最大200
+            }
+
+            if start_time:
+                params["startTime"] = start_time
+            if end_time:
+                params["endTime"] = end_time
+
+            # 调用Bybit API获取历史资金费率
+            funding_history = self.client.get_funding_rate_history(**params)
+
+            # 转换为统一的数据模型
+            response = FundingRateHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(funding_history.get("result", {}).get("list", [])),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in funding_history.get("result", {}).get("list", []):
+                funding_rate = float(item.get("fundingRate", "0"))
+                funding_time = int(item.get("fundingRateTimestamp", "0"))
+
+                # 计算年化费率 (Bybit每8小时一次，一天3次)
+                if apy:
+                    annualized_rate = funding_rate * 3 * 365
+                else:
+                    annualized_rate = None
+
+                rate_data = FundingRateHistory(
+                    symbol=symbol,
+                    funding_rate=funding_rate,
+                    funding_time=funding_time,
+                    annualized_rate=annualized_rate
+                )
+                response.add_rate(rate_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率失败: {e}")
+            return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+    def get_funding_history(self, symbol: str = None, limit: int = 100,
+                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+        """
+        获取用户仓位收取的资金费历史记录
+
+        Args:
+            symbol: 交易对符号 (如 "BTCUSDT")，可选，不指定则返回所有交易对
+            limit: 返回数据条数，最大50，默认50
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+
+        Returns:
+            FundingHistoryResponse: 用户资金费历史响应对象
+        """
+        try:
+            # 构建查询参数
+            params = {
+                "category": "linear",
+                "limit": min(limit, 50)  # Bybit API限制最大50
+            }
+
+            if symbol:
+                params["symbol"] = self.convert_symbol(symbol)
+
+            if start_time:
+                params["startTime"] = start_time
+            if end_time:
+                params["endTime"] = end_time
+
+            # 调用Bybit API获取用户资金费历史
+            funding_history = self.client.get_transaction_log(**params)
+
+            # 转换为统一的数据模型
+            response = FundingHistoryResponse(
+                symbol=symbol,
+                limit=limit,
+                total=len(funding_history.get("result", {}).get("list", [])),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for item in funding_history.get("result", {}).get("list", []):
+                # 筛选资金费相关的交易
+                if item.get("type") == "FUNDING":
+                    funding_amount = float(item.get("funding", "0"))  # 资金费金额
+                    transaction_symbol = item.get("symbol", symbol or "UNKNOWN")
+                    funding_time = int(item.get("transactionTime", "0"))
+
+                    # 计算费率 (基于金额估算)
+                    funding_rate = abs(funding_amount) / 1000.0 if funding_amount != 0 else 0.0
+
+                    funding_data = FundingHistory(
+                        symbol=transaction_symbol,
+                        funding_rate=funding_rate,
+                        funding_amount=funding_amount,
+                        position_side="BOTH",
+                        funding_time=funding_time,
+                        transaction_id=item.get("transactionId", ""),
+                        income_type="FUNDING_FEE"
+                    )
+                    response.add_funding_record(funding_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取用户资金费历史成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取用户资金费历史失败: {e}")
+            return FundingHistoryResponse(symbol=symbol, limit=limit, total=0)
 
 
 if __name__ == '__main__':

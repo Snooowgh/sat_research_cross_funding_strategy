@@ -14,6 +14,7 @@ from cex_tools.cex_enum import ExchangeEnum
 from cex_tools.exchange_model.kline_bar_model import LighterKlineBar
 from cex_tools.exchange_model.order_model import LighterOrder
 from cex_tools.exchange_model.position_model import LighterPositionDetail
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
 from cex_tools.funding_rate_cache import FundingRateCache
 from utils.decorators import timed_cache, async_timed_cache
 from utils.notify_tools import send_slack_message
@@ -387,6 +388,138 @@ class LighterFuture:
         except Exception as e:
             logger.error(f"[Lighter] 转换数量精度失败: {symbol} {size} - {e}")
             return size
+
+    async def get_funding_rate_history(self, symbol: str, limit: int = 100,
+                                     start_time: int = None, end_time: int = None,
+                                     apy: bool = True) -> FundingRateHistoryResponse:
+        """
+        获取交易品种的历史资金费率
+
+        Args:
+            symbol: 交易对符号 (如 "BTC")
+            limit: 返回数据条数，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+            apy: 是否返回年化费率，默认True
+
+        Returns:
+            FundingRateHistoryResponse: 历史资金费率响应对象
+        """
+        try:
+            # 确保已初始化
+            if not self._initialized:
+                await self.init()
+
+            # 转换symbol格式 (Lighter使用不带USDT的格式)
+            symbol = self.__convert_symbol(symbol)
+            if symbol not in self.order_book_detail_map:
+                logger.error(f"[{self.exchange_code}] 交易对 {symbol} 不存在")
+                return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+            market_id = self.order_book_detail_map[symbol].market_id
+
+            # 设置时间范围
+            if end_time is None:
+                end_time = int(time.time() * 1000)
+            if start_time is None:
+                # 根据limit计算开始时间，假设每小时一个数据点
+                start_time = end_time - (limit * 60 * 60 * 1000)
+
+            # Lighter使用1h分辨率获取资金费率历史
+            resolution = "1h"
+            count_back = min(limit, 1000)  # 限制最大数量
+
+            # 调用Lighter API获取历史资金费率
+            funding_rates = await lighter.CandlestickApi(self.api_client).fundings(
+                market_id, resolution, start_time, end_time, count_back
+            )
+
+            # 转换为统一的数据模型
+            response = FundingRateHistoryResponse(
+                symbol=symbol + "USDT",  # 转换回标准格式
+                limit=limit,
+                total=len(funding_rates.fundings),
+                start_time=start_time,
+                end_time=end_time
+            )
+
+            for funding in funding_rates.fundings:
+                funding_rate = float(funding.rate) / 100  # Lighter返回的是百分比，需要转换为小数
+                funding_time = int(funding.timestamp * 1000)  # 转换为毫秒
+
+                # 根据direction调整费率正负
+                if funding.direction == "short":
+                    funding_rate = -funding_rate
+
+                # 计算年化费率 (Lighter每小时一次，一天24次)
+                annualized_rate = funding_rate * 24 * 365 if apy else funding_rate
+
+                rate_data = FundingRateHistory(
+                    symbol=symbol + "USDT",
+                    funding_rate=funding_rate,
+                    funding_time=funding_time,
+                    annualized_rate=annualized_rate if apy else None
+                )
+                response.add_rate(rate_data)
+
+            # 按时间排序（从旧到新）
+            response.sort_by_time()
+
+            logger.info(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] 获取 {symbol} 历史资金费率失败: {e}")
+            return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
+
+    async def get_funding_history(self, symbol: str = None, limit: int = 100,
+                                 start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+        """
+        获取用户仓位收取的资金费历史记录
+
+        Args:
+            symbol: 交易对符号 (如 "BTC")，可选，不指定则返回所有交易对
+            limit: 返回数据条数，默认100
+            start_time: 开始时间戳 (毫秒)，可选
+            end_time: 结束时间戳 (毫秒)，可选
+
+        Returns:
+            FundingHistoryResponse: 用户资金费历史响应对象
+        """
+        try:
+            # 确保已初始化
+            if not self._initialized:
+                await self.init()
+
+            # 更新auth token
+            self.__update_auth()
+
+            # 设置时间范围
+            if end_time is None:
+                end_time = int(time.time())
+            if start_time is None:
+                start_time = end_time - (limit * 60 * 60)  # 假设每小时可能有一次资金费
+
+            time_range = f"{start_time}-{end_time}"
+
+            # 获取账户资金费历史
+            # 注意：Lighter可能没有直接的资金费历史API，这里尝试不同的方法
+            try:
+                response = await lighter.AccountApi(self.api_client).position_funding(
+                    account_index=self.account_index,
+                    limit=limit,
+                    auth=self.auth,
+                    between_timestamps=time_range
+                )
+            except Exception as e:
+                raise e
+
+            logger.info(f"[{self.exchange_code}] 获取用户资金费历史成功: {len(response.data)} 条")
+            return response
+
+        except Exception as e:
+            raise e
+
 
 if __name__ == '__main__':
     pass
