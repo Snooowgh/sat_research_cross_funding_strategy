@@ -859,43 +859,53 @@ class RealtimeHedgeEngine:
         return False
 
     async def auto_force_reduce_position_to_safe(self):
-        risk_data = self._get_risk_data()
-        if not risk_data.should_force_reduce():
-            return
-        reduce_side1 = self._position2.position_side
-        reduce_side2 = self._position1.position_side
-        amount = self._position1.positionAmt
-        mid_price = await self.exchange1.get_tick_price(self.symbol)
-        while amount * mid_price > self.trade_config.max_order_value_usd:
-            amount = amount / 2
-        amount = await self.exchange1.convert_size(self.trade_config.pair1, amount)
-        order1_task = asyncio.create_task(
-            self._place_order_exchange1(self.trade_config.pair1, reduce_side1, amount, mid_price,
-                                        reduceOnly=True)
-        )
-        order2_task = asyncio.create_task(
-            self._place_order_exchange2(self.trade_config.pair2, reduce_side2, amount, mid_price,
-                                        reduceOnly=True)
-        )
+        force_reduce_value = 0
+        total_spread_profit = 0
+        while True:
+            risk_data = self._get_risk_data()
+            if not risk_data.should_force_reduce():
+                break
+            reduce_side1 = self._position2.position_side
+            reduce_side2 = self._position1.position_side
+            amount = self._position1.positionAmt
+            mid_price = await self.exchange1.get_tick_price(self.symbol)
+            while amount * mid_price > self.trade_config.max_order_value_usd:
+                amount = amount / 2
+            amount = await self.exchange1.convert_size(self.trade_config.pair1, amount)
+            order1_task = asyncio.create_task(
+                self._place_order_exchange1(self.trade_config.pair1, reduce_side1, amount, mid_price,
+                                            reduceOnly=True)
+            )
+            order2_task = asyncio.create_task(
+                self._place_order_exchange2(self.trade_config.pair2, reduce_side2, amount, mid_price,
+                                            reduceOnly=True)
+            )
 
-        # 等待两个订单都完成
-        order1, order2 = await asyncio.gather(order1_task, order2_task)
+            # 等待两个订单都完成
+            order1, order2 = await asyncio.gather(order1_task, order2_task)
 
-        # 等待订单成交
-        await asyncio.sleep(0.1)
+            # 等待订单成交
+            await asyncio.sleep(0.1)
 
-        # 获取成交均价
-        order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
-        order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
+            # 获取成交均价
+            order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
+            order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
 
-        # 计算实际价差收益
-        actual_spread = order1_avg_price - order2_avg_price
-        if reduce_side1 == TradeSide.BUY:
-            spread_profit = -actual_spread * amount
-        else:
-            spread_profit = actual_spread * amount
-        logger.warning(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} 触发强制减仓: ${amount * mid_price:.2f}, "
-                       f"价差收益:${spread_profit:.2f}")
+            # 计算实际价差收益
+            actual_spread = order1_avg_price - order2_avg_price
+            if reduce_side1 == TradeSide.BUY:
+                spread_profit = -actual_spread * amount
+            else:
+                spread_profit = actual_spread * amount
+            logger.warning(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} 触发强制减仓: ${amount * mid_price:.2f}, "
+                           f"价差收益:${spread_profit:.2f}")
+            force_reduce_value += amount * mid_price
+            total_spread_profit += spread_profit
+            await self._update_exchange_info()
+        if force_reduce_value > 0:
+            await async_notify_telegram(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} "
+                                        f"触发强制减仓: ${force_reduce_value:.2f} "
+                                        f"价差收益:${total_spread_profit:.2f} ({total_spread_profit/force_reduce_value:.3%})")
 
     async def _trading_loop(self):
         """
