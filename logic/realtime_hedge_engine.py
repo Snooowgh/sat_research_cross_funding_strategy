@@ -25,7 +25,7 @@ from config.env_config import env_config
 from logic.strategy_math import calculate_zscore, infer_optimal_spread_by_zscore
 from utils.decorators import async_timed_cache
 from utils.math_utils import align_with_decimal
-from utils.notify_tools import async_notify_telegram
+from utils.notify_tools import async_notify_telegram, CHANNEL_TYPE
 
 
 @dataclass
@@ -659,12 +659,13 @@ class RealtimeHedgeEngine:
             # 更新最后交易时间
             self._last_trade_time = time.time()
             executed_spread_profit_rate = spread_profit / (amount * order1_avg_price)
-            logger.info(
-                f"✅ {self.symbol} {self.exchange_pair} 交易完成 #{self._trade_count}: "
-                f"成交价 {order1_avg_price:.2f}/{order2_avg_price:.2f} "
-                f"收益 ${spread_profit:.2f} ({executed_spread_profit_rate:.4%}) "
-                f"累计 ${self._cum_volume:.2f} (${self._cum_profit:.2f}){remaining_info}"
-            )
+            trade_msg = (f"✅ {self.symbol} {self.exchange_pair} 交易完成 #{self._trade_count}: "
+                        f"成交价 {order1_avg_price:.2f}/{order2_avg_price:.2f} "
+                        f"收益 ${spread_profit:.2f} ({executed_spread_profit_rate:.4%}) "
+                        f"累计 ${self._cum_volume:.2f} (${self._cum_profit:.2f}){remaining_info}")
+            logger.info(trade_msg)
+            await async_notify_telegram(f"信号触发:{str(signal)}", channel_type=CHANNEL_TYPE.QUIET)
+            await async_notify_telegram(trade_msg, channel_type=CHANNEL_TYPE.QUIET)
             # 机会交易有持仓，转为持续交易
             if self._trade_count == 1 and self.trade_config.daemon_mode and self.trade_config.no_trade_timeout_sec > 0:
                 self.trade_config.no_trade_timeout_sec = 0
