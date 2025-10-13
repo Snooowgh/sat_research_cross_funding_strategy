@@ -28,14 +28,14 @@ class ArbitrageWhiteListParam:
         # "DOGE",
         # "AAVE",
         "UNI",
-        "PENDLE",
+        # "PENDLE",
         "ASTER",
         # "XRP",
         # "BNB",
         "ENA",
-        "SUI",
+        # "SUI",
         # "AVAX",
-        "LINK",
+        # "LINK",
         "PENGU",
         # "WIF"
     ]
