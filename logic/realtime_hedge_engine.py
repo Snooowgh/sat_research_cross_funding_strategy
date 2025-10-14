@@ -190,8 +190,11 @@ class RealtimeHedgeEngine:
             spread_stats = None
 
         # 使用完整的交易对符号，而不是简化的symbol
+        funding_fetch_start = time.time()
         funding_rate1 = await self.exchange1.get_funding_rate(self.trade_config.pair1)
         funding_rate2 = await self.exchange2.get_funding_rate(self.trade_config.pair2)
+        if funding_fetch_start - time.time() > 1:
+            logger.warning(f"❌ 缓存失效: 获取资金费率耗时过长: {funding_fetch_start - time.time()}s")
         return spread_stats, funding_rate1, funding_rate2
 
     def _get_risk_data(self) -> MultiExchangeCombinedInfoModel:
