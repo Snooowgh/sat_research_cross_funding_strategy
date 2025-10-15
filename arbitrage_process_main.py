@@ -51,7 +51,7 @@ class EngineHealthMetrics:
 class ManagerConfig:
     """管理器配置"""
     # 更新间隔
-    risk_update_interval_min: int = 2  # 风控数据更新间隔(分钟)
+    risk_update_interval_min: int = 30  # 风控数据更新间隔(分钟)
     engine_check_interval_min: int = 15  # 引擎状态检查间隔(分钟)
 
     # 通知配置
