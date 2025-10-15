@@ -6,11 +6,18 @@
 @Description :
 @Time        : 2024/7/5 17:19
 """
+from enum import Enum
 
 
 class TradeSide:
     BUY = "BUY"
     SELL = "SELL"
+
+
+class TradingMode(Enum):
+    """交易模式枚举"""
+    TAKER_TAKER = "taker_taker"  # 市价单模式（taker+taker）
+    LIMIT_TAKER = "limit_taker"  # 挂单对冲模式（maker + taker）
 
 
 class ExchangeEnum:

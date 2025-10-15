@@ -163,3 +163,76 @@ class ExchangeConfig:
             'log_file_path': env_config.get_str('LOG_FILE_PATH', './logs/'),
             'log_console_enabled': env_config.get_bool('LOG_CONSOLE_ENABLED', True)
         }
+
+
+    @staticmethod
+    def get_binance_ws_config() -> Dict[str, Any]:
+        """获取Binance交易所配置"""
+        try:
+            return {
+                'api_key': env_config.require_str('BINANCE_API_KEY'),
+                'secret': env_config.require_str('BINANCE_SECRET_KEY'),
+            }
+        except ValueError as e:
+            logger.error(f"获取Binance配置失败: {e}")
+            return {}
+
+    @staticmethod
+    def get_hyperliquid_ws_config() -> Dict[str, Any]:
+        """获取HyperLiquid交易所配置"""
+        try:
+            return {
+                'address': env_config.get_str('HYPERLIQUID_PUBLIC_KEY'),
+            }
+        except ValueError as e:
+            logger.error(f"获取HyperLiquid配置失败: {e}")
+            return {}
+
+    @staticmethod
+    def get_lighter_ws_config() -> Dict[str, Any]:
+        """获取Lighter交易所配置"""
+        try:
+            return {
+                'api_key': env_config.require_int('LIGHTER_API_KEY_INDEX'),
+                'secret': env_config.require_str('LIGHTER_API_PRIVATE_KEY'),
+            }
+        except ValueError as e:
+            logger.error(f"获取Lighter配置失败: {e}")
+            return {}
+
+    @staticmethod
+    def get_aster_ws_config() -> Dict[str, Any]:
+        """获取Aster Finance交易所配置"""
+        try:
+            return {
+                'api_key': env_config.require_str('ASTER_API_KEY'),
+                'secret': env_config.require_str('ASTER_SECRET_KEY'),
+            }
+        except ValueError as e:
+            logger.error(f"获取Aster配置失败: {e}")
+            return {}
+
+    @staticmethod
+    def get_bybit_ws_config() -> Dict[str, Any]:
+        """获取Bybit交易所配置"""
+        try:
+            return {
+                'api_key': env_config.get_str('BYBIT_API_KEY', 'your_bybit_api_key'),
+                'secret': env_config.get_str('BYBIT_SECRET_KEY', 'your_bybit_secret_key'),
+            }
+        except ValueError as e:
+            logger.error(f"获取Bybit配置失败: {e}")
+            return {}
+
+    @staticmethod
+    def get_okx_ws_config() -> Dict[str, Any]:
+        """获取OKX交易所配置"""
+        try:
+            return {
+                'api_key': env_config.get_str('OKX_API_KEY', 'your_okx_api_key'),
+                'secret': env_config.get_str('OKX_SECRET_KEY', 'your_okx_secret_key'),
+                'passphrase': env_config.get_str('OKX_PASSPHRASE', 'your_okx_passphrase'),
+            }
+        except ValueError as e:
+            logger.error(f"获取OKX配置失败: {e}")
+            return {}
