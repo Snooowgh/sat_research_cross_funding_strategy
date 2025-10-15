@@ -618,12 +618,12 @@ class RealtimeHedgeEngine:
             logger.info(f"🔨 {self.symbol} {self.exchange_pair} 执行对冲交易: {amount:.4f}(${amount*signal.price1:.2f}) @ {signal.price1}/{signal.price2} "
                         f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
             logger.debug(signal)
-            if time.time() - signal.signal_generate_start_time > 0.010:
-                # > 10ms 记录警告日志
-                logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms")
-            elif time.time() - signal.signal_generate_start_time > 0.050:
+            if time.time() - signal.signal_generate_start_time > 0.050:
                 logger.error(f"❌❌ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms 过大, 拒绝交易")
                 return
+            elif time.time() - signal.signal_generate_start_time > 0.010:
+                # > 10ms 记录警告日志
+                logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms")
             # 并发下单（传入参考价格）
             order1_task = asyncio.create_task(
                 self._place_order_exchange1(self.trade_config.pair1, signal.side1, amount, signal.price1, reduceOnly=(not signal.is_add_position()))
