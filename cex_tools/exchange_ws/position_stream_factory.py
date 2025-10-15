@@ -9,15 +9,6 @@
 import asyncio
 from typing import Dict, Optional, Callable, List
 from loguru import logger
-
-from cex_tools.exchange_ws.fill_websocket_stream import FillWebSocketStream
-from cex_tools.exchange_ws.binance_fill_websocket import BinanceFillWebSocket
-from cex_tools.exchange_ws.hyperliquid_fill_websocket import HyperliquidFillWebSocket
-from cex_tools.exchange_ws.okx_fill_websocket import OkxFillWebSocket
-from cex_tools.exchange_ws.bybit_fill_websocket import BybitFillWebSocket
-from cex_tools.exchange_ws.lighter_fill_websocket import LighterFillWebSocket
-from cex_tools.exchange_ws.aster_fill_websocket import AsterFillWebSocket
-from cex_tools.exchange_model.fill_event_model import FillEvent
 from config import ExchangeConfig
 
 
@@ -26,12 +17,12 @@ class FillStreamFactory:
 
     # 支持的交易所流类映射
     STREAM_CLASSES = {
-        'binance': BinanceFillWebSocket,
-        'hyperliquid': HyperliquidFillWebSocket,
-        'okx': OkxFillWebSocket,
-        'bybit': BybitFillWebSocket,
-        'lighter': LighterFillWebSocket,
-        'aster': AsterFillWebSocket,
+        'binance': BinancePositionWebSocket,
+        'hyperliquid': HyperliquidPositionWebSocket,
+        'okx': OkxPositionWebSocket,
+        'bybit': BybitPositionWebSocket,
+        'lighter': LighterPositionWebSocket,
+        'aster': AsterPositionWebSocket,
     }
 
     EXCHANGE_WS_CONFIGS = {
@@ -45,16 +36,16 @@ class FillStreamFactory:
 
     @staticmethod
     def create_fill_stream(exchange_code: str,
-                           on_fill_callback: Callable[[FillEvent], None]) -> Optional[FillWebSocketStream]:
+                           on_position_callback: Callable[[PositionEvent], None]) -> Optional[PositionWebSocketStream]:
         """
         创建指定交易所的成交WebSocket流
 
         Args:
             exchange_code: 交易所代码 (如 "binance", "hyperliquid")
-            on_fill_callback: 成交事件回调函数
+            on_position_callback: 成交事件回调函数
 
         Returns:
-            FillWebSocketStream: 成交WebSocket流实例，失败返回None
+            PositionWebSocketStream: 成交WebSocket流实例，失败返回None
         """
         try:
             exchange_code = exchange_code.lower()
@@ -66,7 +57,7 @@ class FillStreamFactory:
             stream_class = FillStreamFactory.STREAM_CLASSES[exchange_code]
 
             stream = stream_class(**FillStreamFactory.EXCHANGE_WS_CONFIGS[exchange_code](),
-                                  on_fill_callback=on_fill_callback)
+                                  on_position_callback=on_position_callback)
 
             return stream
 
@@ -76,22 +67,22 @@ class FillStreamFactory:
 
     @staticmethod
     def create_multiple_streams(exchange_codes,
-                                on_fill_callback: Callable[[FillEvent], None]) -> Dict[str, FillWebSocketStream]:
+                                on_position_callback: Callable[[PositionEvent], None]) -> Dict[str, PositionWebSocketStream]:
         """
         创建多个交易所的成交WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_fill_callback: 成交事件回调函数
+            on_position_callback: 成交事件回调函数
 
         Returns:
-            Dict[str, FillWebSocketStream]: 成交WebSocket流字典
+            Dict[str, PositionWebSocketStream]: 成交WebSocket流字典
         """
         streams = {}
 
         for exchange_code in exchange_codes:
             try:
-                stream = FillStreamFactory.create_fill_stream(exchange_code, on_fill_callback)
+                stream = FillStreamFactory.create_fill_stream(exchange_code, on_position_callback)
                 if stream:
                     streams[exchange_code] = stream
                 else:
@@ -130,17 +121,17 @@ class FillStreamManager:
     """成交WebSocket流管理器"""
 
     def __init__(self):
-        self.streams: Dict[str, FillWebSocketStream] = {}
+        self.streams: Dict[str, PositionWebSocketStream] = {}
         self.is_running = False
 
     async def start_streams(self, exchange_codes: List[str],
-                            on_fill_callback: Callable[[FillEvent], None]) -> bool:
+                            on_position_callback: Callable[[PositionEvent], None]) -> bool:
         """
         启动多个成交WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_fill_callback: 成交事件回调函数
+            on_position_callback: 成交事件回调函数
 
         Returns:
             bool: 是否全部启动成功
@@ -148,7 +139,7 @@ class FillStreamManager:
         try:
             # 创建流
             self.streams = FillStreamFactory.create_multiple_streams(
-                exchange_codes, on_fill_callback
+                exchange_codes, on_position_callback
             )
 
             if not self.streams:
@@ -188,10 +179,9 @@ class FillStreamManager:
             logger.error(f"❌ 启动成交WebSocket流失败: {e}")
             return False
 
-    async def _start_single_stream(self, exchange_code: str, stream: FillWebSocketStream):
+    async def _start_single_stream(self, exchange_code: str, stream: PositionWebSocketStream):
         """启动单个WebSocket流"""
         try:
-            logger.info(f"🚀 启动 {exchange_code} 成交WebSocket流")
             await stream.start()
             logger.success(f"✅ {exchange_code} 成交WebSocket流启动成功")
         except Exception as e:
@@ -218,7 +208,7 @@ class FillStreamManager:
         self.is_running = False
         logger.info("✅ 所有成交WebSocket流已停止")
 
-    async def _stop_single_stream(self, exchange_code: str, stream: FillWebSocketStream):
+    async def _stop_single_stream(self, exchange_code: str, stream: PositionWebSocketStream):
         """停止单个WebSocket流"""
         try:
             logger.info(f"⏹️ 停止 {exchange_code} 成交WebSocket流")
