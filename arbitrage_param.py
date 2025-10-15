@@ -60,10 +60,10 @@ class MultiExchangeArbitrageParam:
         self.exchange_configs = {
             'binance': ('Binance', BinanceFuture, ExchangeConfig.get_binance_config),
             # 'lighter': ('Lighter', LighterFuture, ExchangeConfig.get_lighter_config),
-            'hyperliquid': ('HyperLiquid', HyperLiquidFuture, ExchangeConfig.get_hyperliquid_config),
+            # 'hyperliquid': ('HyperLiquid', HyperLiquidFuture, ExchangeConfig.get_hyperliquid_config),
             # 'bybit': ('Bybit', BybitFuture, ExchangeConfig.get_bybit_config),
             # 'aster': ('Aster', AsterFuture, ExchangeConfig.get_aster_config),
-            # 'okx': ('OKX', OkxFuture, ExchangeConfig.get_okx_config),
+            'okx': ('OKX', OkxFuture, ExchangeConfig.get_okx_config),
         }
 
         # 初始化交易所列表和实例

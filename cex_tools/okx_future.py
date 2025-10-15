@@ -237,12 +237,16 @@ class OkxFuture:
         if price is not None:
             price = self.convert_price(symbol, price)
         start_time = time.time()
+        trade_side = "buy" if side == TradeSide.BUY else "sell"
+        posSide = "" # 看交易模式-默认单向持仓模式
+        # posSide = "net"
+        # posSide = "long" if side == TradeSide.BUY else "short"
         set_order_result = self.trade.set_order(
             instId=self.convert_symbol(symbol),
             tdMode='cross',  # 持仓方式 isolated：逐仓 cross：全仓
-            side="buy" if side == TradeSide.BUY else "sell",  # 持仓方向 long：多单 short：空单
+            side=trade_side,  # 持仓方向 long：多单 short：空单
             ordType=order_type.lower(),
-            posSide='',
+            posSide=posSide,
             px='' if order_type == "MARKET" else price,  # 价格
             sz=contract_quantity,  # 合约张数
             **kwargs

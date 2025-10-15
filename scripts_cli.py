@@ -224,16 +224,17 @@ async def main():
                     continue
 
             # 显示选择的配置信息
-            status = arbitrage_param.get_exchange_pair_status()
-            if status['current_pair']:
-                pair = status['current_pair']
-                console.print(Panel(
-                    f"[bold green]✅ 当前配置[/bold green]\n"
-                    f"交易所1: {pair['exchange1'].upper()}\n"
-                    f"交易所2: {pair['exchange2'].upper()}\n"
-                    f"总交易所数: {status['total_exchanges']}",
-                    border_style="green"
-                ))
+            if hasattr(arbitrage_param, 'get_exchange_pair_status'):
+                status = arbitrage_param.get_exchange_pair_status()
+                if status['current_pair']:
+                    pair = status['current_pair']
+                    console.print(Panel(
+                        f"[bold green]✅ 当前配置[/bold green]\n"
+                        f"交易所1: {pair['exchange1'].upper()}\n"
+                        f"交易所2: {pair['exchange2'].upper()}\n"
+                        f"总交易所数: {status['total_exchanges']}",
+                        border_style="green"
+                    ))
 
             # 询问是否继续
             if not Confirm.ask("是否继续进行交易配置?", default=True):
