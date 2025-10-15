@@ -198,8 +198,8 @@ class RealtimeHedgeEngine:
         return spread_stats, funding_rate1, funding_rate2
 
     def _get_risk_data(self) -> MultiExchangeCombinedInfoModel:
-        if time.time() - self.exchange_combined_info_cache.get("update_time") > 130:
-            logger.warning("风控缓存数据超过130秒未更新，可能存在风险")
+        if time.time() - self.exchange_combined_info_cache.get("update_time") > 31 * 60:
+            logger.warning("风控缓存数据未更新，可能存在风险")
         return self.exchange_combined_info_cache.get("risk_data")
 
     def _get_max_open_notional_value(self):
