@@ -2,8 +2,8 @@
 """
 @Project     : darwin_light
 @Author      : Arson
-@File Name   : fill_stream_factory
-@Description : 成交WebSocket流工厂类
+@File Name   : position_stream_factory
+@Description : 仓位WebSocket流工厂类
 @Time        : 2025/10/15
 """
 import asyncio
@@ -12,8 +12,8 @@ from loguru import logger
 from config import ExchangeConfig
 
 
-class FillStreamFactory:
-    """成交WebSocket流工厂类"""
+class PositionStreamFactory:
+    """仓位WebSocket流工厂类"""
 
     # 支持的交易所流类映射
     STREAM_CLASSES = {
@@ -35,62 +35,62 @@ class FillStreamFactory:
     }
 
     @staticmethod
-    def create_fill_stream(exchange_code: str,
+    def create_position_stream(exchange_code: str,
                            on_position_callback: Callable[[PositionEvent], None]) -> Optional[PositionWebSocketStream]:
         """
-        创建指定交易所的成交WebSocket流
+        创建指定交易所的仓位WebSocket流
 
         Args:
             exchange_code: 交易所代码 (如 "binance", "hyperliquid")
-            on_position_callback: 成交事件回调函数
+            on_position_callback: 仓位事件回调函数
 
         Returns:
-            PositionWebSocketStream: 成交WebSocket流实例，失败返回None
+            PositionWebSocketStream: 仓位WebSocket流实例，失败返回None
         """
         try:
             exchange_code = exchange_code.lower()
 
-            if exchange_code not in FillStreamFactory.STREAM_CLASSES:
-                logger.error(f"❌ 不支持的交易所成交流: {exchange_code}")
+            if exchange_code not in PositionStreamFactory.STREAM_CLASSES:
+                logger.error(f"❌ 不支持的交易所仓位流: {exchange_code}")
                 return None
 
-            stream_class = FillStreamFactory.STREAM_CLASSES[exchange_code]
+            stream_class = PositionStreamFactory.STREAM_CLASSES[exchange_code]
 
-            stream = stream_class(**FillStreamFactory.EXCHANGE_WS_CONFIGS[exchange_code](),
+            stream = stream_class(**PositionStreamFactory.EXCHANGE_WS_CONFIGS[exchange_code](),
                                   on_position_callback=on_position_callback)
 
             return stream
 
         except Exception as e:
-            logger.error(f"❌ 创建 {exchange_code} 成交WebSocket流失败: {e}")
+            logger.error(f"❌ 创建 {exchange_code} 仓位WebSocket流失败: {e}")
             return None
 
     @staticmethod
     def create_multiple_streams(exchange_codes,
                                 on_position_callback: Callable[[PositionEvent], None]) -> Dict[str, PositionWebSocketStream]:
         """
-        创建多个交易所的成交WebSocket流
+        创建多个交易所的仓位WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_position_callback: 成交事件回调函数
+            on_position_callback: 仓位事件回调函数
 
         Returns:
-            Dict[str, PositionWebSocketStream]: 成交WebSocket流字典
+            Dict[str, PositionWebSocketStream]: 仓位WebSocket流字典
         """
         streams = {}
 
         for exchange_code in exchange_codes:
             try:
-                stream = FillStreamFactory.create_fill_stream(exchange_code, on_position_callback)
+                stream = PositionStreamFactory.create_position_stream(exchange_code, on_position_callback)
                 if stream:
                     streams[exchange_code] = stream
                 else:
-                    logger.warning(f"⚠️ 跳过 {exchange_code} 成交流创建")
+                    logger.warning(f"⚠️ 跳过 {exchange_code} 仓位流创建")
             except Exception as e:
-                logger.error(f"❌ 创建 {exchange_code} 成交流异常: {e}")
+                logger.error(f"❌ 创建 {exchange_code} 仓位流异常: {e}")
 
-        logger.info(f"✅ 成功创建 {len(streams)}/{len(exchange_codes)} 个成交WebSocket流")
+        logger.info(f"✅ 成功创建 {len(streams)}/{len(exchange_codes)} 个仓位WebSocket流")
         return streams
 
     @staticmethod
@@ -101,7 +101,7 @@ class FillStreamFactory:
         Returns:
             List[str]: 支持的交易所代码列表
         """
-        return list(FillStreamFactory.STREAM_CLASSES.keys())
+        return list(PositionStreamFactory.STREAM_CLASSES.keys())
 
     @staticmethod
     def validate_exchange_support(exchange_code: str) -> bool:
@@ -114,11 +114,11 @@ class FillStreamFactory:
         Returns:
             bool: 是否支持
         """
-        return exchange_code.lower() in FillStreamFactory.STREAM_CLASSES
+        return exchange_code.lower() in PositionStreamFactory.STREAM_CLASSES
 
 
-class FillStreamManager:
-    """成交WebSocket流管理器"""
+class PositionStreamManager:
+    """仓位WebSocket流管理器"""
 
     def __init__(self):
         self.streams: Dict[str, PositionWebSocketStream] = {}
@@ -127,23 +127,23 @@ class FillStreamManager:
     async def start_streams(self, exchange_codes: List[str],
                             on_position_callback: Callable[[PositionEvent], None]) -> bool:
         """
-        启动多个成交WebSocket流
+        启动多个仓位WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_position_callback: 成交事件回调函数
+            on_position_callback: 仓位事件回调函数
 
         Returns:
             bool: 是否全部启动成功
         """
         try:
             # 创建流
-            self.streams = FillStreamFactory.create_multiple_streams(
+            self.streams = PositionStreamFactory.create_multiple_streams(
                 exchange_codes, on_position_callback
             )
 
             if not self.streams:
-                logger.error("❌ 没有可用的成交WebSocket流")
+                logger.error("❌ 没有可用的仓位WebSocket流")
                 return False
 
             # 并发启动所有流
@@ -169,23 +169,23 @@ class FillStreamManager:
             self.is_running = success_count > 0
 
             if success_count == len(self.streams):
-                logger.success(f"✅ 所有 {success_count} 个成交WebSocket流启动成功")
+                logger.success(f"✅ 所有 {success_count} 个仓位WebSocket流启动成功")
                 return True
             else:
-                logger.warning(f"⚠️ 部分成交WebSocket流启动失败: {success_count}/{len(self.streams)}")
+                logger.warning(f"⚠️ 部分仓位WebSocket流启动失败: {success_count}/{len(self.streams)}")
                 return success_count > 0
 
         except Exception as e:
-            logger.error(f"❌ 启动成交WebSocket流失败: {e}")
+            logger.error(f"❌ 启动仓位WebSocket流失败: {e}")
             return False
 
     async def _start_single_stream(self, exchange_code: str, stream: PositionWebSocketStream):
         """启动单个WebSocket流"""
         try:
             await stream.start()
-            logger.success(f"✅ {exchange_code} 成交WebSocket流启动成功")
+            logger.success(f"✅ {exchange_code} 仓位WebSocket流启动成功")
         except Exception as e:
-            logger.error(f"❌ {exchange_code} 成交WebSocket流启动失败: {e}")
+            logger.error(f"❌ {exchange_code} 仓位WebSocket流启动失败: {e}")
             raise
 
     async def stop_all_streams(self):
@@ -193,7 +193,7 @@ class FillStreamManager:
         if not self.streams:
             return
 
-        logger.info("🛑 停止所有成交WebSocket流")
+        logger.info("🛑 停止所有仓位WebSocket流")
 
         # 并发停止所有流
         stop_tasks = []
@@ -206,23 +206,23 @@ class FillStreamManager:
 
         self.streams.clear()
         self.is_running = False
-        logger.info("✅ 所有成交WebSocket流已停止")
+        logger.info("✅ 所有仓位WebSocket流已停止")
 
     async def _stop_single_stream(self, exchange_code: str, stream: PositionWebSocketStream):
         """停止单个WebSocket流"""
         try:
-            logger.info(f"⏹️ 停止 {exchange_code} 成交WebSocket流")
+            logger.info(f"⏹️ 停止 {exchange_code} 仓位WebSocket流")
             await stream.stop()
-            logger.debug(f"✅ {exchange_code} 成交WebSocket流已停止")
+            logger.debug(f"✅ {exchange_code} 仓位WebSocket流已停止")
         except Exception as e:
-            logger.warning(f"⚠️ 停止 {exchange_code} 成交WebSocket流异常: {e}")
+            logger.warning(f"⚠️ 停止 {exchange_code} 仓位WebSocket流异常: {e}")
 
     def get_status_report(self) -> str:
         """获取所有流的状态报告"""
         if not self.streams:
-            return "📊 成交WebSocket管理器状态:\n  • 没有活跃的流"
+            return "📊 仓位WebSocket管理器状态:\n  • 没有活跃的流"
 
-        report = f"📊 成交WebSocket管理器状态\n"
+        report = f"📊 仓位WebSocket管理器状态\n"
         report += f"  • 管理器状态: {'🟢 运行中' if self.is_running else '🔴 已停止'}\n"
         report += f"  • 活跃流数量: {len(self.streams)}\n\n"
 
