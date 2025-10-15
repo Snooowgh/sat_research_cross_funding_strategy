@@ -3,7 +3,7 @@
 @Project     : darwin_light
 @Author      : Arson
 @File Name   : binance_position_stream
-@Description : Binance仓位WebSocket流实现
+@Description : Binance仓位WebSocket流实现（使用官方binance-futures-connector库）
 @Time        : 2025/10/15
 """
 import asyncio
@@ -17,26 +17,41 @@ from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
 from cex_tools.exchange_model.position_model import BinancePositionDetail
 from cex_tools.exchange_model.position_event_model import PositionEventType
 
+from binance.um_futures import UMFutures
+
 
 class BinancePositionWebSocket(PositionWebSocketStream):
-    """Binance仓位WebSocket流实现"""
+    """Binance仓位WebSocket流实现（使用官方binance-futures-connector库）"""
 
-    def __init__(self, api_key: str = None, secret: str = None, **kwargs):
+    def __init__(self, api_key: str = None, secret: str = None, testnet: bool = False, **kwargs):
         """
         初始化Binance仓位WebSocket流
 
         Args:
             api_key: API密钥
             secret: API密钥
+            testnet: 是否使用测试网
             **kwargs: 其他配置参数
         """
         super().__init__("Binance", kwargs.get('on_position_callback'))
         self.api_key = api_key
         self.secret = secret
+        self.testnet = testnet
+
+        # 创建UMFutures客户端
+        if testnet:
+            self.client = UMFutures(
+                key=api_key,
+                secret=secret,
+                base_url="https://testnet.binancefuture.com"
+            )
+        else:
+            self.client = UMFutures(key=api_key, secret=secret)
+
         self._ws_connection = None
         self._listen_task: Optional[asyncio.Task] = None
         self._listen_key = None
-        self._base_url = "wss://fstream.binance.com/ws"
+        self._base_url = "wss://stream.binancefuture.com/ws" if testnet else "wss://fstream.binance.com/ws"
 
     async def _get_listen_key(self) -> Optional[str]:
         """
@@ -46,20 +61,14 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             str: listen key，失败返回None
         """
         try:
-            import aiohttp
-            url = "https://fstream.binance.com/fapi/v1/listenKey"
-            headers = {"X-MBX-APIKEY": self.api_key} if self.api_key else {}
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        listen_key = data.get("listenKey")
-                        logger.debug(f"[{self.exchange_name}] 获取listen key成功: {listen_key[:10]}...")
-                        return listen_key
-                    else:
-                        logger.error(f"[{self.exchange_name}] 获取listen key失败: HTTP {response.status}")
-                        return None
+            response = self.client.new_listen_key()
+            if response and 'listenKey' in response:
+                listen_key = response['listenKey']
+                logger.debug(f"[{self.exchange_name}] 获取listen key成功: {listen_key[:10]}...")
+                return listen_key
+            else:
+                logger.error(f"[{self.exchange_name}] 获取listen key失败: {response}")
+                return None
         except Exception as e:
             logger.error(f"[{self.exchange_name}] 获取listen key异常: {e}")
             return None
@@ -69,16 +78,11 @@ class BinancePositionWebSocket(PositionWebSocketStream):
         定期保持listen key活跃（每30分钟）
         """
         try:
-            import aiohttp
-            url = "https://fstream.binance.com/fapi/v1/listenKey"
-            headers = {"X-MBX-APIKEY": self.api_key} if self.api_key else {}
-
-            async with aiohttp.ClientSession() as session:
-                async with session.put(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        logger.debug(f"[{self.exchange_name}] listen key保活成功")
-                    else:
-                        logger.warning(f"[{self.exchange_name}] listen key保活失败: HTTP {response.status}")
+            response = self.client.renew_listen_key(self._listen_key)
+            if response and response.get('code') == 200:
+                logger.debug(f"[{self.exchange_name}] listen key保活成功")
+            else:
+                logger.warning(f"[{self.exchange_name}] listen key保活失败: {response}")
         except Exception as e:
             logger.error(f"[{self.exchange_name}] listen key保活异常: {e}")
 
@@ -195,7 +199,6 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 await self._handle_account_update(data)
             elif msg_type == "ORDER_TRADE_UPDATE":
                 # 订单更新消息，可能间接影响仓位
-                # 这里可以选择性处理，比如记录交易历史
                 logger.debug(f"[{self.exchange_name}] 收到订单更新: {data.get('o', {}).get('i', '')}")
             else:
                 logger.debug(f"[{self.exchange_name}] 收到未知消息类型: {msg_type}")
@@ -211,9 +214,6 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             data: 账户更新数据
         """
         try:
-            # 获取更新时间
-            update_time = data.get("T", time.time() * 1000)
-
             # 处理仓位更新
             positions = data.get("a", {}).get("P", [])
             if positions:
@@ -247,7 +247,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             logger.warning(f"[{self.exchange_name}] 仓位WebSocket 已在运行")
             return
 
-        if not self.api_key:
+        if not all([self.api_key, self.secret]):
             logger.error(f"[{self.exchange_name}] 缺少API密钥，无法启动用户数据流")
             return
 
@@ -286,15 +286,27 @@ class BinancePositionWebSocket(PositionWebSocketStream):
     async def _close_listen_key(self):
         """关闭listen key"""
         try:
-            import aiohttp
-            url = "https://fstream.binance.com/fapi/v1/listenKey"
-            headers = {"X-MBX-APIKEY": self.api_key} if self.api_key else {}
-
-            async with aiohttp.ClientSession() as session:
-                async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        logger.debug(f"[{self.exchange_name}] listen key关闭成功")
-                    else:
-                        logger.warning(f"[{self.exchange_name}] listen key关闭失败: HTTP {response.status}")
+            response = self.client.close_listen_key(self._listen_key)
+            if response and response.get('code') == 200:
+                logger.debug(f"[{self.exchange_name}] listen key关闭成功")
+            else:
+                logger.warning(f"[{self.exchange_name}] listen key关闭失败: {response}")
         except Exception as e:
             logger.error(f"[{self.exchange_name}] 关闭listen key异常: {e}")
+
+    def get_status_report(self) -> str:
+        """获取状态报告"""
+        base_report = super().get_status_report()
+
+        # 添加Binance特有的状态信息
+        ws_status = ""
+        if self._ws_connection:
+            ws_status = f"\n  • WebSocket状态: 🟢 已连接"
+        elif self._listen_key:
+            ws_status = f"\n  • WebSocket状态: 🟡 已断开"
+        else:
+            ws_status = f"\n  • WebSocket状态: 🔴 未初始化"
+
+        testnet_status = f"\n  • 网络: {'测试网' if self.testnet else '主网'}"
+
+        return base_report + ws_status + testnet_status
