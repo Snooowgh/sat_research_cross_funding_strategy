@@ -236,7 +236,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
 
             if event_type == 'ACCOUNT_UPDATE':
                 # 账户更新消息，包含仓位信息
-                logger.debug(f"[{self.exchange_code}] 收到账户更新消息")
+                # logger.debug(f"[{self.exchange_code}] 收到账户更新消息")
                 await self._handle_account_update(data.get('a', {}))
             elif event_type == 'ORDER_TRADE_UPDATE':
                 # 订单更新消息，暂时不处理

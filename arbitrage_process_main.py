@@ -113,7 +113,7 @@ async def _update_shared_engine_stats(risk_data_dict: Dict, engine, engine_confi
             logger.debug(f"获取价差费率信息失败: {e}")
 
         # 计算平均交易额
-        average_trade_amount = stats['cum_volume'] / stats['trade_count'] if stats['trade_count'] > 0 else 0.0
+        average_trade_amount = stats['cum_volume'] / (stats['trade_count'] if stats['trade_count'] > 0 else 0.0)
 
         # 更新共享字典
         if 'engine_stats' not in risk_data_dict:
@@ -455,7 +455,7 @@ class MultiProcessArbitrageManager:
             # 获取风控数据
             self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
-                find_opportunities=True,  # 管理器不需要寻找机会
+                find_opportunities=False,  # 管理器不需要寻找机会
                 opportunity_limit=5
             )
             self.last_risk_update_time = time.time()
@@ -668,7 +668,7 @@ class MultiProcessArbitrageManager:
         try:
             self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
-                find_opportunities=True,
+                find_opportunities=False,
                 opportunity_limit=5
             )
             logger.debug(f"🔄 风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")

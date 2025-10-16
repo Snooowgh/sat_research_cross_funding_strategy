@@ -185,7 +185,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
                 # 仓位数据更新
                 data = message.get("data", [])
                 if data:
-                    logger.debug(f"[{self.exchange_code}] 收到 {len(data)} 个仓位更新")
+                    # logger.debug(f"[{self.exchange_code}] 收到 {len(data)} 个仓位更新")
                     await self._handle_positions_update(data)
             elif message.get("arg", {}).get("channel") == "orders":
                 # 仓位数据更新
@@ -196,7 +196,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             elif message.get("arg", {}).get("channel") == "account":
                 # 仓位数据更新
                 data = message.get("data", None)
-                logger.debug(f"[{self.exchange_code}] 收到账户更新")
+                # logger.debug(f"[{self.exchange_code}] 收到账户更新")
                 await self._handle_account_update(data)
             elif message.get("op") == "error":
                 # 错误消息

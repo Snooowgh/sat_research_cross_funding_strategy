@@ -1328,5 +1328,5 @@ class RealtimeHedgeEngine:
             "cum_volume": self._cum_volume,
             "cum_profit": self._cum_profit,
             "remaining_amount": self._remaining_amount,
-            "progress": (self.trade_config.total_amount - self._remaining_amount) / self.trade_config.total_amount
+            "progress": (self.trade_config.total_amount - self._remaining_amount) / self.trade_config.total_amount if self.trade_config.total_amount > 0 else 0
         }

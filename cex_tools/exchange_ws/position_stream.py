@@ -26,7 +26,7 @@ class PositionWebSocketStream(ABC):
         """
         self.exchange_code = exchange_code
         async def default_callback(e):
-            logger.debug(f"{self.exchange_code} Event: {e}")
+            pass
         self.on_account_callback = kwargs.get("on_account_callback", default_callback)
         self.on_position_callback = kwargs.get("on_position_callback", default_callback)
         self.on_order_update_callback = kwargs.get("on_order_update_callback", default_callback)

@@ -23,7 +23,7 @@ class ArbitrageWhiteListParam:
         # "BTC",
         # "ETH",
         # "SOL",
-        "HYPE",
+        # "HYPE",
         # "PUMP",
         # "DOGE",
         # "AAVE",
