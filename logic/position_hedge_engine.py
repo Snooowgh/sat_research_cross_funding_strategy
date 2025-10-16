@@ -143,7 +143,8 @@ class PositionHedgeEngine:
             hedge_start_time = time.time()
 
             logger.info(f"🎯 执行对冲订单: {target_exchange.exchange_code} {symbol} {side} {amount}")
-            
+            amount = min(await self.exchange1.convert_size(symbol, amount),
+                         await self.exchange2.convert_size(symbol, amount))
             # 下市价对冲单
             order_result = await target_exchange.make_new_order(
                 symbol=symbol,
@@ -258,7 +259,7 @@ class PositionHedgeEngine:
             return fallback_price
 
     def _calculate_price_difference(self, original_price: float, hedge_price: float,
-                                   original_side: str, hedge_side: str) -> float:
+                                    original_side: str, hedge_side: str) -> float:
         """
         计算价差（原始价格 - 对冲价格）
 
@@ -283,7 +284,7 @@ class PositionHedgeEngine:
             return hedge_price - original_price
 
     def _calculate_slippage(self, original_price: float, hedge_price: float,
-                           original_side: str, hedge_side: str) -> float:
+                            original_side: str, hedge_side: str) -> float:
         """
         计算滑点（相对于原始价格的百分比）
 
@@ -313,7 +314,7 @@ class PositionHedgeEngine:
             return abs(slippage_percent)
 
     def _update_hedge_stats(self, price_difference: float, slippage: float,
-                           delay_ms: float, is_profitable: bool):
+                            delay_ms: float, is_profitable: bool):
         """
         更新对冲统计数据
 
@@ -384,10 +385,12 @@ class PositionHedgeEngine:
                 logger.info(
                     f"   源交易所: {event.exchange_code} {event.symbol} {event.side} {filled_quantity} {last_filled_price}")
                 logger.info(f"   目标交易所: {target_exchange.exchange_code} {hedge_side} {hedge_amount}")
-
-                # 执行对冲订单
-                await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
-                                                last_filled_price, event)
+                try:
+                    # 执行对冲订单
+                    await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
+                                                    last_filled_price, event)
+                except Exception as e:
+                    logger.error(f"❌ 对冲订单执行异常: {e}")
 
                 self.stats['total_hedges'] += 1
 

@@ -68,11 +68,12 @@ class OkxFuture:
         self.get_symbol_sheet_to_amt("BTCUSDT")
 
     def set_leverage(self, symbol, default_leverage=None):
+        symbol = self.convert_symbol(symbol)
         if default_leverage is None:
             default_leverage = self.get_pair_max_leverage(symbol)
         self.account.set_leverage(lever=default_leverage,
                                   mgnMode="cross",
-                                  instId=self.convert_symbol(symbol))
+                                  instId=symbol)
 
     def load_pair_info_map(self):
         pass
@@ -175,11 +176,12 @@ class OkxFuture:
         return order_qty * self.get_symbol_sheet_to_amt(symbol)
 
     def convert_size_to_contract(self, symbol, size):
+        symbol = self.convert_symbol(symbol)
         # round_quantity_result = self.convert_size(symbol, size)
         round_quantity_result = size
         contract_to_f_result = self.trade.quantity_to_f(
             quantity=round_quantity_result / self.get_symbol_sheet_to_amt(symbol),
-            instId=self.convert_symbol(symbol),
+            instId=symbol,
         )["data"]
         return contract_to_f_result
 
@@ -190,24 +192,26 @@ class OkxFuture:
         :param size:
         :return:
         """
+        symbol = self.convert_symbol(symbol)
         # 底层库TMD有问题
         sheet_to_amt = self.get_symbol_sheet_to_amt(symbol)
         round_quantity_result = self.trade.round_quantity(
             quantity=float(size) / sheet_to_amt,
-            instId=self.convert_symbol(symbol),
+            instId=symbol,
             ordType='market',  # market | limit
         )['data'] * sheet_to_amt
         return round_quantity_result
 
     def convert_price(self, symbol, price):
+        symbol = self.convert_symbol(symbol)
         round_price_result = self.trade.round_price(
             price=price,
-            instId=self.convert_symbol(symbol),
+            instId=symbol,
             type='FLOOR',
         )['data']
         price_to_f_result = self.trade.price_to_f(
             price=round_price_result,
-            instId=self.convert_symbol(symbol),
+            instId=symbol,
         )["data"]
         return price_to_f_result
 
@@ -215,12 +219,13 @@ class OkxFuture:
         pass
 
     def cancel_all_orders(self, symbol=None):
+        symbol = self.convert_symbol(symbol)
         get_orders_pending = self.trade.get_orders_pending()
         if symbol is not None:
             for order in get_orders_pending["data"]:
-                if order["instId"] == self.convert_symbol(symbol):
+                if order["instId"] == symbol:
                     self.trade.cancel_order(
-                        instId=self.convert_symbol(symbol),
+                        instId=symbol,
                         ordId=order["ordId"]
                     )
         else:
@@ -231,9 +236,9 @@ class OkxFuture:
             parallelize_tasks(func_list)
 
     def make_new_order(self, symbol, side, order_type, quantity, price=None, msg="", **kwargs):
-
+        symbol = self.convert_symbol(symbol)
         if kwargs.get("stopPrice"):
-            kwargs["slTriggerPx"] = self.convert_price(self.convert_symbol(symbol), kwargs["stopPrice"])
+            kwargs["slTriggerPx"] = self.convert_price(symbol, kwargs["stopPrice"])
             kwargs["slOrdPx"] = -1  # 市价止损
         quantity = float(quantity)
         if quantity == 0:
@@ -248,7 +253,7 @@ class OkxFuture:
         # posSide = "net"
         # posSide = "long" if side == TradeSide.BUY else "short"
         set_order_result = self.trade.set_order(
-            instId=self.convert_symbol(symbol),
+            instId=symbol,
             tdMode='cross',  # 持仓方式 isolated：逐仓 cross：全仓
             side=trade_side,  # 持仓方向 long：多单 short：空单
             ordType=order_type.lower(),
@@ -408,6 +413,7 @@ class OkxFuture:
         return withdraw_result
 
     def create_stoploss_order(self, symbol, side, amount, stopPrice):
+        symbol = self.convert_symbol(symbol)
         ret = self.ccxt_exchange.create_stop_market_order(symbol, side, amount, stopPrice)
         logger.info(f"止损止盈单: {symbol} {side} {amount} {stopPrice}")
         logger.info(ret)
