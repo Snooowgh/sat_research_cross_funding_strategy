@@ -63,7 +63,7 @@ class FundingOpportunity:
 class SearchConfig:
     """搜索配置"""
     min_funding_diff: float = 0.08      # 最小费率差（年化）
-    max_opportunities: int = 50         # 最大返回机会数
+    max_opportunities: int = 5         # 最大返回机会数
     include_spread_analysis: bool = True  # 是否包含价差分析
     spread_analysis_interval: str = "1m"   # K线间隔
     spread_analysis_limit: int = 1000     # K线数量
@@ -312,21 +312,18 @@ class AsyncFundingSpreadSearcher:
         )
 
         # 筛选满足最小费率差要求的交易对
-        if self.config.use_white_list:
-            qualified_pairs = sorted_pairs
-        else:
-            qualified_pairs = [
-                (pair, diff) for pair, diff in sorted_pairs
-                if diff >= self.config.min_funding_diff
-            ]
+        qualified_pairs = [
+            (pair, diff) for pair, diff in sorted_pairs
+            if diff >= self.config.min_funding_diff
+        ]
 
-            if not qualified_pairs:
-                logger.warning(f"没有交易对满足最小费率差要求 {self.config.min_funding_diff:.2%}")
-                return []
+        if not qualified_pairs:
+            logger.warning(f"没有交易对满足最小费率差要求 {self.config.min_funding_diff:.2%}")
+            return []
 
-            if not qualified_pairs:
-                logger.warning(f"没有交易对满足最小均值价差收益率要求 {self.config.min_mean_spread_profit_rate:.2%}")
-                return []
+        if not qualified_pairs:
+            logger.warning(f"没有交易对满足最小均值价差收益率要求 {self.config.min_mean_spread_profit_rate:.2%}")
+            return []
 
 
         # 4. 创建机会对象（限制数量）

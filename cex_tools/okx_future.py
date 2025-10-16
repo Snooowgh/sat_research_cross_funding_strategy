@@ -18,6 +18,7 @@ from cex_tools.exchange_model.order_model import OkxOrder
 from cex_tools.exchange_model.kline_bar_model import OkxKlineBar
 from cex_tools.exchange_model.orderbook_model import OkxOrderBook
 from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
+from cex_tools.funding_rate_cache import FundingRateCache
 from utils.decorators import timed_cache
 from utils.notify_tools import send_slack_message
 from utils.parallelize_utils import parallelize_tasks
@@ -338,6 +339,17 @@ class OkxFuture:
 
     @timed_cache(timeout=60)
     def get_funding_rate(self, symbol, apy=True):
+        # 优先从缓存获取
+        cache = FundingRateCache()
+        cached_rate = cache.get_funding_rate("okx", symbol)
+
+        if cached_rate is not None:
+            # 缓存中的是单次费率，需要根据间隔转换
+            # Binance通常是8小时一次，一天3次
+            if apy:
+                return cached_rate * 3 * 365
+            else:
+                return cached_rate
         # TODO: 数据准确性
         r = self.public_api.get_funding_rate(self.convert_symbol(symbol))["data"][-1]
         time_coef = 24 / ((float(r["nextFundingTime"]) - float(r["fundingTime"])) / 1000 / 60 / 60)

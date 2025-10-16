@@ -163,12 +163,12 @@ class BinanceFuture(UMFutures):
             return ret
 
     def get_tick_price(self, symbol):
+        symbol = self.convert_symbol(symbol)
         return float(self.get_all_tick_price(symbol))
 
     def get_klines(self, symbol, interval, limit=500):
         # 添加USDT后缀
-        if not symbol.endswith("USDT"):
-            symbol = f"{symbol}USDT"
+        symbol = self.convert_symbol(symbol)
 
         return [BinanceKlineBar(k) for k in self.klines(symbol=symbol, interval=interval, limit=limit)]
 
@@ -206,6 +206,7 @@ class BinanceFuture(UMFutures):
         return float(("{:." + str(quantity_precision) + "f}").format(size))
 
     def convert_price(self, symbol, price):
+        symbol = self.convert_symbol(symbol)
         pair_info = self.get_pair_info(symbol)
         tick_size = pair_info["tick_size"]
 
@@ -219,6 +220,7 @@ class BinanceFuture(UMFutures):
         return ("{:." + str(pair_info["pricePrecision"]) + "f}").format(converted_number)
 
     def get_orders_by_type(self, symbol, order_type=None, status=None):
+        symbol = self.convert_symbol(symbol)
         ret = []
         all_orders = self.get_orders(symbol=symbol, recvWindow=self.recvWindow)
         for order in all_orders:
@@ -231,6 +233,7 @@ class BinanceFuture(UMFutures):
         pass
 
     def cancel_all_orders(self, symbol, limit=10):
+        symbol = self.convert_symbol(symbol)
         all_orders = self.get_all_orders(symbol=symbol, limit=limit, recvWindow=self.recvWindow)
         for order in all_orders:
             if order["status"] not in [BinanceOrderStatus.FILLED, BinanceOrderStatus.CANCELED,
