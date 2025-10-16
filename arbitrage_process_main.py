@@ -18,7 +18,11 @@ from utils.notify_tools import async_notify_telegram, CHANNEL_TYPE
 from cex_tools.exchange_ws.stream_factory import StreamFactory
 import asyncio
 from loguru import logger
-from logic.realtime_hedge_engine import RealtimeHedgeEngine, TradeConfig, RiskConfig
+from logic.realtime_hedge_engine import RealtimeHedgeEngine, TradeConfig, RiskConfig, TradeMode
+from logic.position_hedge_engine import create_hedge_engine, HedgeConfig
+from cex_tools.exchange_ws.position_stream_factory import PositionStreamManager
+from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
+from config.env_config import env_config
 
 
 @dataclass
@@ -179,7 +183,8 @@ def run_real_engine_in_process(engine_config: EngineConfig,
                 side1="BUY",  # daemon模式下由引擎自动决定
                 side2="SELL",
                 daemon_mode=True,
-                no_trade_timeout_sec=0  # 持续运行
+                no_trade_timeout_sec=0,  # 持续运行
+                trade_mode=TradeMode(env_config.require_str("RH_DEFAULT_TRADE_MODE"))
             )
 
             # 创建风控配置
@@ -257,6 +262,137 @@ def run_real_engine_in_process(engine_config: EngineConfig,
         traceback.print_exc()
 
 
+def run_position_hedge_engine_in_process(stop_event):
+    """
+    在独立进程中运行PositionHedgeEngine
+
+    Args:
+        stop_event: 停止事件
+    """
+    async def hedge_engine_main():
+        """PositionHedgeEngine主程序"""
+        hedge_engine = None
+        stream_manager = None
+
+        try:
+            # 设置进程日志
+            logger.add(
+                "logs/position_hedge_engine.log",
+                rotation="1 day",
+                retention="7 days",
+                level="INFO",
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+            )
+
+            logger.info("🚀 启动 PositionHedgeEngine 进程")
+
+            # 初始化交易所参数
+            arbitrage_param = MultiExchangeArbitrageParam(auto_init=True)
+            await arbitrage_param.init_async_exchanges()
+            await asyncio.sleep(0.3)  # 确保交易所初始化完成
+
+            # 获取所有可用的交易所
+            available_exchanges = list(arbitrage_param.async_exchanges.keys())
+            if len(available_exchanges) < 2:
+                logger.error("❌ 需要至少2个可用交易所才能运行仓位对冲引擎")
+                return
+
+            logger.info(f"📝 可用交易所: {available_exchanges}")
+
+            # 创建仓位流管理器
+            stream_manager = PositionStreamManager()
+
+            # 启动仓位WebSocket流
+            success = await stream_manager.start_streams(
+                exchange_codes=available_exchanges
+            )
+
+            if not success:
+                logger.error("❌ 仓位WebSocket流启动失败，无法启动对冲引擎")
+                return
+
+            logger.success("✅ 仓位WebSocket流启动成功")
+
+            # 创建对冲配置
+            hedge_config = HedgeConfig()
+
+            # 创建PositionHedgeEngine实例
+            hedge_engine = create_hedge_engine(
+                exchange1=arbitrage_param.async_exchanges[available_exchanges[0]],
+                exchange2=arbitrage_param.async_exchanges[available_exchanges[1]],
+                stream1=stream_manager.streams.get(available_exchanges[0]),
+                stream2=stream_manager.streams.get(available_exchanges[1])
+            )
+            # 启动对冲引擎
+            await hedge_engine.start()
+
+            logger.success("✅ PositionHedgeEngine 启动成功")
+
+            # 运行直到收到停止信号
+            last_stats_update = time.time()
+            while not stop_event.is_set():
+                # 使用更短的睡眠以便更快响应停止信号
+                try:
+                    await asyncio.wait_for(asyncio.sleep(0.5), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+
+                # 定期记录统计信息
+                current_time = time.time()
+                if current_time - last_stats_update > 30 * 60:  # 每30min记录一次统计
+                    stats = hedge_engine.get_stats()
+                    logger.info(f"📊 对冲引擎统计: {stats}")
+                    last_stats_update = current_time
+
+            logger.info("🛑 PositionHedgeEngine 收到停止信号，正在停止...")
+
+            # 停止对冲引擎（添加超时控制）
+            try:
+                await asyncio.wait_for(hedge_engine.stop(), timeout=3.0)
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ PositionHedgeEngine 停止超时，强制继续")
+
+        except Exception as e:
+            logger.error(f"❌ PositionHedgeEngine 进程异常: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # 发送错误通知
+            try:
+                await async_notify_telegram(
+                    f"⚠️ PositionHedgeEngine 进程异常\n"
+                    f"错误: {str(e)}\n"
+                    f"进程已崩溃，请检查日志"
+                )
+            except Exception as notify_error:
+                logger.error(f"发送错误通知失败: {notify_error}")
+
+        finally:
+            try:
+                # 停止对冲引擎
+                if hedge_engine is not None:
+                    await hedge_engine.stop()
+                    logger.info("✅ PositionHedgeEngine 已关闭")
+
+                # 停止所有WebSocket流
+                if stream_manager is not None:
+                    await stream_manager.stop_all_streams()
+                    logger.info("✅ 所有仓位WebSocket流已关闭")
+
+            except Exception as e:
+                logger.error(f"❌ 关闭 PositionHedgeEngine 失败: {e}")
+
+    # 运行引擎主程序
+    try:
+        asyncio.run(hedge_engine_main())
+    except KeyboardInterrupt:
+        logger.info("👋 PositionHedgeEngine 收到中断信号")
+    except Exception as e:
+        logger.error(f"❌ PositionHedgeEngine 进程崩溃: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 class MultiProcessArbitrageManager:
     """多进程套利管理器 - 专注于引擎管理和风控数据分发"""
 
@@ -293,6 +429,14 @@ class MultiProcessArbitrageManager:
         # 错误收集系统
         self.error_logs = []  # 存储最近的错误日志
         self.system_stats = {}  # 系统统计信息
+
+        # 检测交易模式
+        self.trade_mode = env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker")
+        self.is_limit_taker_mode = self.trade_mode == "limit_taker"
+
+        # PositionHedgeEngine 进程管理
+        self.hedge_engine_process: Optional[mp.Process] = None
+        self.hedge_engine_stop_event: Optional[mp.Event] = None
 
     async def initialize(self):
         """初始化管理器"""
@@ -361,6 +505,49 @@ class MultiProcessArbitrageManager:
                 logger.error(f"❌ 启动 {symbol} 引擎失败: {e}")
                 # 即使失败也继续启动下一个引擎
                 continue
+
+        # 如果是 limit_taker 模式，启动 PositionHedgeEngine
+        if self.is_limit_taker_mode:
+            await self._start_position_hedge_engine()
+
+    async def _start_position_hedge_engine(self):
+        """启动PositionHedgeEngine进程"""
+        try:
+            if self.hedge_engine_process and self.hedge_engine_process.is_alive():
+                logger.warning("⚠️ PositionHedgeEngine 进程已存在，跳过启动")
+                return
+
+            logger.info("🚀 启动 PositionHedgeEngine 进程 (limit_taker模式)")
+
+            # 创建停止事件
+            self.hedge_engine_stop_event = self.process_manager.Event()
+
+            # 创建并启动进程
+            self.hedge_engine_process = mp.Process(
+                target=run_position_hedge_engine_in_process,
+                args=(self.hedge_engine_stop_event,),
+                name="PositionHedgeEngine"
+            )
+
+            self.hedge_engine_process.start()
+            self.stats['total_engines_started'] += 1
+
+            logger.success(f"✅ PositionHedgeEngine 进程启动成功 (PID: {self.hedge_engine_process.pid})")
+
+            # 发送通知
+            await async_notify_telegram(
+                f"🎯 PositionHedgeEngine 已启动\n"
+                f"交易模式: {self.trade_mode}\n"
+                f"进程ID: {self.hedge_engine_process.pid}\n"
+                f"用于处理 limit_taker 模式的仓位对冲"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ 启动 PositionHedgeEngine 进程失败: {e}")
+            # 清理资源
+            if self.hedge_engine_stop_event:
+                self.hedge_engine_stop_event = None
+            raise
 
     async def _select_optimal_exchange_pair(self, symbol: str) -> Optional[tuple]:
         """智能选择最优交易所组合"""
@@ -781,11 +968,17 @@ class MultiProcessArbitrageManager:
             # 构建基础信息
             message = (
                 f"📊 套利管理器智能状态报告\n"
+                f"🎯 交易模式: {self.trade_mode}\n"
                 f"🤖 活跃引擎: {active_count} (健康: {healthy_count})\n"
                 f"💾 平均内存: {avg_memory:.0f}MB\n"
                 f"🕐 风控更新: {time.strftime('%H:%M:%S', time.localtime(self.last_risk_update_time))}\n"
                 f"⏱️  运行时长: {int((time.time() - self.stats.get('start_time', time.time())) / 60)}分钟\n"
             )
+
+            # 如果是 limit_taker 模式，添加 PositionHedgeEngine 状态
+            if self.is_limit_taker_mode and self.hedge_engine_process:
+                hedge_status = "✅ 运行中" if self.hedge_engine_process.is_alive() else "❌ 已停止"
+                message += f"🔄 对冲引擎: {hedge_status} (PID: {self.hedge_engine_process.pid})\n"
 
             # 添加系统负载信息
             if self.system_stats:
@@ -917,6 +1110,26 @@ class MultiProcessArbitrageManager:
                 stop_event.set()
             except Exception as e:
                 logger.error(f"❌ 发送停止信号给 {process_key} 失败: {e}")
+
+        # 停止 PositionHedgeEngine 进程
+        if self.hedge_engine_stop_event and self.hedge_engine_process:
+            try:
+                logger.info("🛑 停止 PositionHedgeEngine 进程...")
+                self.hedge_engine_stop_event.set()
+
+                # 等待进程退出
+                self.hedge_engine_process.join(timeout=3)
+                if self.hedge_engine_process.is_alive():
+                    logger.warning("⚠️ PositionHedgeEngine 进程未在3秒内退出，强制终止")
+                    self.hedge_engine_process.terminate()
+                    self.hedge_engine_process.join(timeout=2)
+                    if self.hedge_engine_process.is_alive():
+                        logger.error("🚨 PositionHedgeEngine 进程无法终止，强制杀死")
+                        self.hedge_engine_process.kill()
+                        self.hedge_engine_process.join(timeout=1)
+                logger.info("✅ PositionHedgeEngine 进程已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭 PositionHedgeEngine 进程失败: {e}")
 
         # 等待所有进程退出 - 使用更激进的超时策略
         for process_key, process in self.engine_processes.items():

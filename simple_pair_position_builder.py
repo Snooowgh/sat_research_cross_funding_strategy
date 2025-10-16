@@ -28,7 +28,7 @@ from cex_tools.exchange_ws.aster_orderbook_stream import AsterOrderBookStreamAsy
 from cex_tools.exchange_ws.hyperliquid_orderbook_stream import HyperliquidOrderBookStream
 from cex_tools.exchange_ws.okx_orderbook_stream import OkxOrderBookStreamAsync
 from cex_tools.exchange_ws.bybit_orderbook_stream import BybitOrderBookStreamAsync
-from logic.realtime_hedge_engine import RealtimeHedgeEngine, TradeConfig, RiskConfig
+from logic.realtime_hedge_engine import RealtimeHedgeEngine, TradeConfig, RiskConfig, TradeMode
 from utils.notify_img_generator import NotifyImgGenerator
 
 
@@ -566,7 +566,8 @@ async def execute_with_realtime_engine(trade_params: TradeParams, no_trade_timeo
         trade_interval_sec=0.1,
         use_dynamic_amount=trade_params.use_dynamic_amount,
         max_first_level_ratio=trade_params.max_first_level_ratio,
-        no_trade_timeout_sec=no_trade_timeout_sec
+        no_trade_timeout_sec=no_trade_timeout_sec,
+        trade_mode=TradeMode.TAKER_TAKER
     )
 
     # 创建风控配置

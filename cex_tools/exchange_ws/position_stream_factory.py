@@ -137,7 +137,7 @@ class PositionStreamManager:
         self.is_running = False
 
     async def start_streams(self, exchange_codes: List[str],
-                            on_order_update_callback: Callable[[PositionEvent], None]) -> bool:
+                            on_order_update_callback: Callable[[PositionEvent], None] = None) -> bool:
         """
         启动多个仓位WebSocket流
 
