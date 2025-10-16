@@ -74,6 +74,7 @@ async def batch_process_with_concurrency_limit(
     process_func: Callable,
     max_concurrency: int = 5,
     progress_callback: Callable = None,
+    delay: float = None
 ) -> List[Any]:
     """
     带并发限制的批量处理工具函数
@@ -106,7 +107,8 @@ async def batch_process_with_concurrency_limit(
         result = await future
         results.append(result)
         completed_count += 1
-
+        if delay:
+            await asyncio.sleep(delay)
         if progress_callback:
             progress_callback(completed_count, len(items), result)
 

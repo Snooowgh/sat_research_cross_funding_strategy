@@ -343,8 +343,9 @@ class AsyncFundingSpreadSearcher:
         all_opportunities = await batch_process_with_concurrency_limit(
             items=qualified_pairs,
             process_func=self.create_opportunity,
-            max_concurrency=10,  # 限制并发数，避免超过交易所API限制
+            max_concurrency=3,  # 限制并发数，避免超过交易所API限制
             progress_callback=progress_callback,
+            delay=0.3
         )
 
         # 过滤掉None值（处理失败的项目）

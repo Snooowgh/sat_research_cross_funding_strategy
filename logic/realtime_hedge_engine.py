@@ -189,9 +189,9 @@ class RealtimeHedgeEngine:
     async def update_exchange_info_helper(self):
         raise Exception("未传参！!")
 
-    @async_timed_cache(timeout=3600)
+    @async_timed_cache(timeout=60)
     async def _get_pair_market_info(self):
-        """获取交易对的市场信息, 1h更新一次"""
+        """获取交易对的市场信息, 1m更新一次"""
         # 使用异步方法获取市场信息
         try:
             spread_stats = await self.spread_analyzer.analyze_spread(symbol=self.symbol,

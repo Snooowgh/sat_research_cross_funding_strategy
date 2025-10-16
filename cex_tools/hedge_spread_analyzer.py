@@ -117,7 +117,7 @@ class HedgeSpreadAnalyzer:
             return aligned_klines1, aligned_klines2
 
         except Exception as e:
-            logger.error(f"获取对齐K线数据失败: {e}")
+            logger.error(f"{symbol} {self.exchange_pair} 获取对齐K线数据失败: {e}")
             raise
 
     def calculate_price_spreads(self, klines1: List[KlineData], klines2: List[KlineData]) -> List[float]:
