@@ -669,7 +669,7 @@ class MultiProcessArbitrageManager:
         try:
             self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
-                find_opportunities=False,
+                find_opportunities=True,
                 opportunity_limit=5
             )
             logger.debug(f"🔄 风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
