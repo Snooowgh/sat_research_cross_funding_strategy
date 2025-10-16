@@ -15,7 +15,7 @@ def calculate_zscore(current_spread,
     ma_spread = spread_stats.mean_spread if spread_stats else 0.0
     ma_spread_std = spread_stats.std_spread if spread_stats else 0.0
     # 计算当前价差（包含资金费率）
-    current_spread += funding_rate1 / 365 / 3 - funding_rate2 / 365 / 3  # 加上资金费率差异(8小时)
+    current_spread += (funding_rate1 / 365 / 3 - funding_rate2 / 365 / 3) * 3  # 加上资金费率差异(8小时) * 3
     if side1:
         sign = 1 if side1==TradeSide.BUY else -1
         z_score = (current_spread - ma_spread + sign * fee_rate) / ma_spread_std if ma_spread_std > 0 else 0

@@ -41,8 +41,8 @@ class RiskConfig:
     max_orderbook_age_sec: float = 1.0  # 订单簿最大过期时间（秒）
     max_spread_pct: float = 0.0015  # 最大买卖价差（0.15%）
     min_liquidity_usd: float = 500  # 最小流动性（美元）
-    min_profit_rate: float = 0.0005  # 开仓时最小价差收益率（0.05%）
-    reduce_pos_min_profit_rate: float = -0.001  # 平仓时最小价差收益率（0.1%）
+    min_profit_rate: float = 0.0002  # 开仓时最小价差收益率（0.02%）
+    reduce_pos_min_profit_rate: float = -0.0013  # 平仓时最小价差收益率（0.13%）
     liquidity_depth_levels: int = 10  # 流动性检查深度层级
     user_min_profit_rate: float = 0.001  # 用户设置的最小收益率底线（不可低于此值）
     enable_dynamic_profit_rate: bool = True  # 是否启用动态调整收益率
