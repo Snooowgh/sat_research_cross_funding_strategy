@@ -72,7 +72,7 @@ class TradeConfig:
     max_order_value_usd: float = 500.0  # 单笔最大订单金额（美元）
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
-    trade_mode: TradeMode = TradeMode.TAKER_TAKER  # 交易模式
+    trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
 
 
 @dataclass
