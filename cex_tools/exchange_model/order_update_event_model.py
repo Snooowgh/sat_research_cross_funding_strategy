@@ -6,17 +6,15 @@
 @Description : 订单事件数据模型
 @Time        : 2025/10/15
 """
-from enum import Enum
 
-
-class OrderType(Enum):
+class OrderType:
     """订单类型"""
     LIMIT = "LIMIT"  # 限价单
     MARKET = "MARKET"  # 市价单
     LIQUIDATION = "LIQUIDATION"  # 爆仓
 
 
-class ExecutionType(Enum):
+class ExecutionType:
     """执行类型"""
     NEW = "NEW"
     CANCELED = "CANCELED"
@@ -25,7 +23,7 @@ class ExecutionType(Enum):
     TRADE = "TRADE"
 
 
-class OrderStatusType(Enum):
+class OrderStatusType:
     """状态"""
     NEW = "NEW"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
@@ -43,6 +41,7 @@ class OrderUpdateEvent:
                  symbol: str,
                  client_order_id: str,
                  order_id,
+                 trade_id,
                  side,
                  order_type: OrderType,
                  original_quantity,
@@ -80,6 +79,8 @@ class OrderUpdateEvent:
         self.order_status = order_status
         # 交易所订单ID
         self.order_id = order_id
+        # 交易ID
+        self.trade_id = trade_id
         # 最近一次成交数量
         self.order_last_filled_quantity = order_last_filled_quantity
         # 累计成交数量
@@ -95,7 +96,7 @@ class OrderUpdateEvent:
 
     def __str__(self):
         return (f"OrderEvent(exchange_code={self.exchange_code}, symbol={self.symbol}, order_id={self.order_id}, "
-                f"client_order_id={self.client_order_id}, side={self.side}, "
+                f"client_order_id={self.client_order_id}, trade_id={self.trade_id}, side={self.side}, "
                 f"order_type={self.order_type}, quantity={self.original_quantity}, price={self.price}, "
                 f"avg_price={self.avg_price}, "
                 f"order_status={self.order_status}, filled_quantity={self.order_filled_accumulated_quantity}, "

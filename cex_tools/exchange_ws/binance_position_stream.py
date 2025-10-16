@@ -8,11 +8,10 @@
 """
 import asyncio
 import json
-import time
 import threading
 from loguru import logger
 from typing import Optional, Dict, Any
-
+import websockets.client
 from cex_tools.cex_enum import ExchangeEnum
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
 from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
@@ -147,7 +146,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 pass
             self._ws_connection = None
 
-    def _handle_order_update(self, data):
+    async def _handle_order_update(self, data):
         """
             {
                 "s":"BTCUSDT",              // Symbol
@@ -196,6 +195,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 symbol=data.get('s', ''),
                 client_order_id=data.get('c', ''),
                 order_id=data.get('i', ''),
+                trade_id=data.get('t', ''),
                 side=data.get('S', ''),
                 order_type=order_type_str,
                 original_quantity=float(data.get('q', 0)),
@@ -209,21 +209,21 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 position_side_mode=data.get('ps', ''),
                 timestamp=data.get('T', 0)
             )
-            self.on_order_update_callback(event)
+            await self.on_order_update_callback(event)
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 处理订单更新数据异常: {e}, data: {data}")
             return None
 
-    def _handle_account_update(self, data: Dict[str, Any]):
+    async def _handle_account_update(self, data: Dict[str, Any]):
         """
         处理账户更新消息
 
         Args:
             data: ACCOUNT_UPDATE消息数据
         """
-        self.on_account_callback(data)
+        await self.on_account_callback(data)
 
-    def _handle_websocket_message(self, message: str):
+    async def _handle_websocket_message(self, message: str):
         """
         处理WebSocket消息
 
@@ -237,11 +237,11 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             if event_type == 'ACCOUNT_UPDATE':
                 # 账户更新消息，包含仓位信息
                 logger.debug(f"[{self.exchange_code}] 收到账户更新消息")
-                self._handle_account_update(data.get('a', {}))
+                await self._handle_account_update(data.get('a', {}))
             elif event_type == 'ORDER_TRADE_UPDATE':
                 # 订单更新消息，暂时不处理
                 logger.debug(f"[{self.exchange_code}] 收到Order更新消息")
-                self._handle_order_update(data.get('o', {}))
+                await self._handle_order_update(data.get('o', {}))
             elif event_type == 'MARGIN_CALL':
                 # 保证金催缴消息
                 logger.warning(f"[{self.exchange_code}] 收到保证金催缴: {data}")
@@ -254,9 +254,9 @@ class BinancePositionWebSocket(PositionWebSocketStream):
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 处理WebSocket消息异常: {e}")
 
-    def _run_websocket_blocking(self):
+    async def _run_websocket_async(self):
         """
-        在独立线程中运行WebSocket（阻塞调用，支持自动重连）
+        异步运行WebSocket（支持自动重连）
         """
         retry_count = 0
         retry_delay = 3  # 重连延迟（秒）
@@ -270,45 +270,42 @@ class BinancePositionWebSocket(PositionWebSocketStream):
 
                 # 确保有listen key
                 if not self.listen_key:
-                    # 在同步线程中获取listen key
-                    try:
-                        response = self.client.new_listen_key()
-                        if response and 'listenKey' in response:
-                            self.listen_key = response['listenKey']
-                        else:
-                            raise Exception("获取listen key失败")
-                    except Exception as e:
-                        logger.error(f"[{self.exchange_code}] 获取listen key失败: {e}")
-                        raise
+                    new_listen_key = await self._get_listen_key()
+                    if not new_listen_key:
+                        logger.error(f"[{self.exchange_code}] 获取listen key失败")
+                        raise Exception("获取listen key失败")
+                    self.listen_key = new_listen_key
 
                 # 创建WebSocket连接
                 ws_url = f"{self.base_ws_url}/{self.listen_key}"
-                import websockets.sync.client
-                ws = websockets.sync.client.connect(
+                async with websockets.client.connect(
                     ws_url,
-                    close_timeout=10
-                )
-                self._ws_connection = ws
-                logger.debug(f"[{self.exchange_code}] WebSocket连接已建立: {ws_url}")
+                    close_timeout=10,
+                    ping_interval=20,
+                    ping_timeout=10
+                ) as ws:
+                    self._ws_connection = ws
+                    logger.debug(f"[{self.exchange_code}] WebSocket连接已建立: {ws_url}")
 
-                # 重连成功，重置计数器
-                if retry_count > 0:
-                    logger.debug(f"[{self.exchange_code}] 重连成功！")
-                retry_count = 0
+                    # 重连成功，重置计数器
+                    if retry_count > 0:
+                        logger.debug(f"[{self.exchange_code}] 重连成功！")
+                    retry_count = 0
 
-                # 持续接收消息
-                while self._running:
-                    try:
-                        message = ws.recv(timeout=10)
-                        self._handle_websocket_message(message)
+                    # 持续接收消息
+                    while self._running:
+                        try:
+                            message = await asyncio.wait_for(ws.recv(), timeout=30)
+                            await self._handle_websocket_message(message)
 
-                    except TimeoutError:
-                        # 超时，发送ping
-                        ws.ping()
-                    except Exception as e:
-                        if self._running:
-                            logger.warning(f"[{self.exchange_code}] WebSocket接收消息异常: {e}")
-                        break
+                        except asyncio.TimeoutError:
+                            # 超时，发送ping（websockets库会自动处理ping）
+                            logger.debug(f"[{self.exchange_code}] WebSocket接收超时")
+                            continue
+                        except Exception as e:
+                            if self._running:
+                                logger.warning(f"[{self.exchange_code}] WebSocket接收消息异常: {e}")
+                            break
 
             except Exception as e:
                 if not self._running:
@@ -320,19 +317,34 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 retry_count += 1
 
                 # 清理连接
-                if self._ws_connection:
-                    try:
-                        self._ws_connection.close()
-                    except:
-                        pass
-                    self._ws_connection = None
+                self._ws_connection = None
 
                 # 等待后重连
                 if self._running:
                     logger.debug(f"[{self.exchange_code}] {retry_delay}秒后重连...")
-                    time.sleep(retry_delay)
+                    await asyncio.sleep(retry_delay)
 
-        logger.debug(f"[{self.exchange_code}] WebSocket线程退出")
+        logger.debug(f"[{self.exchange_code}] WebSocket任务退出")
+
+    def _run_websocket_blocking(self):
+        """
+        在独立线程中运行WebSocket（阻塞调用，支持自动重连）
+        """
+        try:
+            # 获取或创建事件循环
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果没有事件循环，创建一个新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            # 在事件循环中运行异步WebSocket任务
+            loop.run_until_complete(self._run_websocket_async())
+        except Exception as e:
+            logger.error(f"[{self.exchange_code}] WebSocket线程异常: {e}")
+        finally:
+            logger.debug(f"[{self.exchange_code}] WebSocket线程退出")
 
     async def start(self):
         """启动WebSocket连接"""
@@ -406,7 +418,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
         # 关闭WebSocket连接
         if self._ws_connection:
             try:
-                self._ws_connection.close()
+                await self._ws_connection.close()
             except:
                 pass
             self._ws_connection = None

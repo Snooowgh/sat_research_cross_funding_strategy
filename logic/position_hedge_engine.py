@@ -6,15 +6,12 @@
 @Description : 仓位对冲引擎，监听两个交易所的订单更新，自动执行对冲交易
 @Time        : 2025/10/16
 """
-import asyncio
 from typing import Dict, Optional, Callable, Set
 from loguru import logger
-from decimal import Decimal
 from dataclasses import dataclass
 
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent, OrderStatusType, OrderType
 from cex_tools.async_exchange_adapter import AsyncExchangeAdapter
-from cex_tools.exchange_ws.position_stream_factory import PositionStreamFactory
 from utils.notify_tools import async_notify_telegram
 
 
@@ -74,7 +71,7 @@ class PositionHedgeEngine:
 
     def _get_order_key(self, event: OrderUpdateEvent) -> str:
         """生成订单唯一标识"""
-        return f"{event.exchange_code}_{event.order_id}"
+        return f"{event.exchange_code}_{event.order_id}_{event.trade_id}"
 
     def _is_limit_order_filled(self, event: OrderUpdateEvent) -> bool:
         """
@@ -91,13 +88,10 @@ class PositionHedgeEngine:
             return False
 
         # 检查是否有成交
-        if (event.order_status == OrderStatusType.FILLED or
-                event.order_status == OrderStatusType.PARTIALLY_FILLED):
-
+        if event.order_status == OrderStatusType.FILLED or event.order_status == OrderStatusType.PARTIALLY_FILLED:
             # 检查最近一次成交数量大于0
-            if event.order_last_filled_quantity and float(event.order_last_filled_quantity) > 0:
+            if event.order_last_filled_quantity > 0:
                 return True
-
         return False
 
     def _get_hedge_side(self, original_side: str) -> str:
@@ -117,7 +111,8 @@ class PositionHedgeEngine:
                                    target_exchange: AsyncExchangeAdapter,
                                    symbol: str,
                                    side: str,
-                                   amount: float) -> Optional[Dict]:
+                                   amount: float,
+                                   last_filled_price: float) -> Optional[Dict]:
         """
         执行对冲订单
 
@@ -139,7 +134,7 @@ class PositionHedgeEngine:
                 side=side,
                 order_type="MARKET",
                 amount=amount,
-                price=None  # 市价单不需要价格
+                price=last_filled_price
             )
 
             if order_result:
@@ -196,6 +191,7 @@ class PositionHedgeEngine:
             try:
                 # 获取成交数量
                 filled_quantity = float(event.order_last_filled_quantity)
+                last_filled_price = float(event.last_filled_price)
 
                 # 获取对冲交易对
                 if event.exchange_code == self.exchange1_code:
@@ -210,11 +206,13 @@ class PositionHedgeEngine:
                 hedge_side = self._get_hedge_side(event.side)
 
                 logger.info(f"🔄 检测到对冲机会:")
-                logger.info(f"   源交易所: {event.exchange_code} {event.symbol} {event.side} {filled_quantity}")
+                logger.info(
+                    f"   源交易所: {event.exchange_code} {event.symbol} {event.side} {filled_quantity} {last_filled_price}")
                 logger.info(f"   目标交易所: {target_exchange.exchange_code} {hedge_side} {hedge_amount}")
 
                 # 执行对冲订单
-                await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount)
+                await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
+                                                last_filled_price)
 
                 self.stats['total_hedges'] += 1
 
@@ -238,8 +236,8 @@ class PositionHedgeEngine:
         """
 
         async def on_order_update(event: OrderUpdateEvent):
-            logger.debug(f"📨 订单更新: {exchange_code} {event.symbol} {event.order_status} "
-                         f"{event.order_last_filled_quantity}")
+            logger.info(f"📨 订单更新: {exchange_code} {event.symbol} {event.order_type} {event.order_status} "
+                        f"fill size: {event.order_last_filled_quantity} fill price: {event.last_filled_price}")
             await self._handle_order_update(event)
 
         return on_order_update

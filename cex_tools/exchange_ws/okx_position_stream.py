@@ -231,6 +231,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             symbol=symbol,
             client_order_id=order_data.get('clOrdId', ''),
             order_id=order_data.get('ordId', ''),
+            trade_id=order_data.get('tradeId', ''),
             side=order_data.get('side', '').upper(),
             order_type=order_data.get('ordType', '').upper(),
             original_quantity=original_quantity,
@@ -244,11 +245,11 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             position_side_mode=order_data.get('posSide', ''),
             timestamp=int(order_data.get('uTime', 0))
         )
-        self.on_order_update_callback(event)
+        await self.on_order_update_callback(event)
 
     async def _handle_account_update(self, account_data):
         # logger.info(f"账户数据更新:{account_data}")
-        self.on_account_callback(account_data)
+        await self.on_account_callback(account_data)
 
     async def _handle_positions_update(self, positions_data: list):
         """
@@ -294,7 +295,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
 
                 # 转换为标准格式
                 position_detail = self._convert_okx_position(position_data)
-                self.on_position_callback(position_detail)
+                await self.on_position_callback(position_detail)
 
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 处理仓位更新异常: {e}")

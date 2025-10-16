@@ -25,16 +25,17 @@ class PositionWebSocketStream(ABC):
             on_position_callback: 仓位事件回调函数
         """
         self.exchange_code = exchange_code
-        self.on_account_callback = kwargs.get("on_account_callback", lambda e: None)
-        self.on_position_callback = kwargs.get("on_position_callback", lambda e: None)
-        self.on_order_update_callback = kwargs.get("on_order_update_callback", lambda e: None)
+        async def default_callback(e):
+            logger.debug(f"{self.exchange_code} Event: {e}")
+        self.on_account_callback = kwargs.get("on_account_callback", default_callback)
+        self.on_position_callback = kwargs.get("on_position_callback", default_callback)
+        self.on_order_update_callback = kwargs.get("on_order_update_callback", default_callback)
         self.latest_positions: Dict[str, any] = {}  # symbol -> position_detail
         self._running = False
         self._last_update_time = 0
 
     def set_order_update_callback(self, call_back):
         self.on_order_update_callback = call_back
-
 
     @abstractmethod
     async def start(self):
