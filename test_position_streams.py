@@ -122,7 +122,7 @@ async def main():
     """主函数"""
     # 默认测试的交易所（根据你的环境变量配置调整）
     test_exchanges = [
-        # 'binance',
+        'binance',
         # 'hyperliquid',
         'okx',
         # 'bybit',

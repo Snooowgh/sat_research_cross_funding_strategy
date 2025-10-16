@@ -212,8 +212,6 @@ class OkxPositionWebSocket(PositionWebSocketStream):
         """
             {'instType': 'SWAP', 'instId': 'ETH-USDT-SWAP', 'tgtCcy': '', 'ccy': 'USDT', 'tradeQuoteCcy': '', 'ordId': '2956222619053072384', 'clOrdId': '', 'algoClOrdId': '', 'algoId': '', 'tag': '', 'px': '3900', 'sz': '0.01', 'notionalUsd': '3.9009750000000007', 'ordType': 'limit', 'side': 'buy', 'posSide': 'net', 'tdMode': 'cross', 'accFillSz': '0', 'fillNotionalUsd': '', 'avgPx': '0', 'state': 'canceled', 'lever': '0', 'pnl': '0', 'feeCcy': 'USDT', 'fee': '0', 'rebateCcy': 'USDT', 'rebate': '0', 'category': 'normal', 'uTime': '1760604892870', 'cTime': '1760604699542', 'source': '', 'reduceOnly': 'false', 'cancelSource': '1', 'quickMgnType': '', 'stpId': '', 'stpMode': 'cancel_taker', 'attachAlgoClOrdId': '', 'lastPx': '3993.13', 'isTpLimit': 'false', 'slTriggerPx': '', 'slTriggerPxType': '', 'tpOrdPx': '', 'tpTriggerPx': '', 'tpTriggerPxType': '', 'slOrdPx': '', 'fillPx': '', 'tradeId': '', 'fillSz': '0', 'fillTime': '', 'fillPnl': '0', 'fillFee': '0', 'fillFeeCcy': '', 'execType': '', 'fillPxVol': '', 'fillPxUsd': '', 'fillMarkVol': '', 'fillFwdPx': '', 'fillMarkPx': '', 'fillIdxPx': '', 'amendSource': '', 'reqId': '', 'amendResult': '', 'code': '0', 'msg': '', 'pxType': '', 'pxUsd': '', 'pxVol': '', 'linkedAlgoOrd': {'algoId': ''}, 'attachAlgoOrds': []}
         """
-        logger.info(f"订单更新:{order_data}")
-
         # 提取交易对符号
         instId = order_data.get('instId', '')
         symbol = instId.replace("-USDT-SWAP", "")
@@ -236,8 +234,8 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             side=order_data.get('side', '').upper(),
             order_type=order_data.get('ordType', '').upper(),
             original_quantity=original_quantity,
-            price=float(order_data.get('px', 0)),
-            avg_price=float(order_data.get('avgPx', 0)),
+            price=float(order_data.get('px') if order_data.get('px') else 0),
+            avg_price=float(order_data.get('avgPx') if order_data.get('avgPx') else 0),
             order_status=order_data.get('state', '').upper(),
             order_last_filled_quantity=order_last_filled_quantity,
             order_filled_accumulated_quantity=order_filled_accumulated_quantity,
