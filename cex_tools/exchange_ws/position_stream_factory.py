@@ -48,13 +48,13 @@ class PositionStreamFactory:
 
     @staticmethod
     def create_position_stream(exchange_code: str,
-                           on_position_callback: Callable[[PositionEvent], None]) -> Optional[PositionWebSocketStream]:
+                           on_order_update_callback: Callable[[PositionEvent], None]) -> Optional[PositionWebSocketStream]:
         """
         创建指定交易所的仓位WebSocket流
 
         Args:
             exchange_code: 交易所代码 (如 "binance", "hyperliquid")
-            on_position_callback: 仓位事件回调函数
+            on_order_update_callback: 仓位事件回调函数
 
         Returns:
             PositionWebSocketStream: 仓位WebSocket流实例，失败返回None
@@ -69,7 +69,7 @@ class PositionStreamFactory:
             stream_class = PositionStreamFactory.STREAM_CLASSES[exchange_code]
 
             stream = stream_class(**PositionStreamFactory.EXCHANGE_WS_CONFIGS[exchange_code](),
-                                  on_position_callback=on_position_callback)
+                                  on_order_update_callback=on_order_update_callback)
 
             return stream
 
@@ -79,13 +79,13 @@ class PositionStreamFactory:
 
     @staticmethod
     def create_multiple_streams(exchange_codes,
-                                on_position_callback: Callable[[PositionEvent], None]) -> Dict[str, PositionWebSocketStream]:
+                                on_order_update_callback: Callable[[PositionEvent], None]) -> Dict[str, PositionWebSocketStream]:
         """
         创建多个交易所的仓位WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_position_callback: 仓位事件回调函数
+            on_order_update_callback: 仓位事件回调函数
 
         Returns:
             Dict[str, PositionWebSocketStream]: 仓位WebSocket流字典
@@ -94,7 +94,7 @@ class PositionStreamFactory:
 
         for exchange_code in exchange_codes:
             try:
-                stream = PositionStreamFactory.create_position_stream(exchange_code, on_position_callback)
+                stream = PositionStreamFactory.create_position_stream(exchange_code, on_order_update_callback)
                 if stream:
                     streams[exchange_code] = stream
                 else:
@@ -137,13 +137,13 @@ class PositionStreamManager:
         self.is_running = False
 
     async def start_streams(self, exchange_codes: List[str],
-                            on_position_callback: Callable[[PositionEvent], None]) -> bool:
+                            on_order_update_callback: Callable[[PositionEvent], None]) -> bool:
         """
         启动多个仓位WebSocket流
 
         Args:
             exchange_codes: 交易所
-            on_position_callback: 仓位事件回调函数
+            on_order_update_callback: 仓位事件回调函数
 
         Returns:
             bool: 是否全部启动成功
@@ -151,7 +151,7 @@ class PositionStreamManager:
         try:
             # 创建流
             self.streams = PositionStreamFactory.create_multiple_streams(
-                exchange_codes, on_position_callback
+                exchange_codes, on_order_update_callback
             )
 
             if not self.streams:
@@ -233,14 +233,9 @@ class PositionStreamManager:
         """获取所有流的状态报告"""
         if not self.streams:
             return "📊 仓位WebSocket管理器状态:\n  • 没有活跃的流"
-
         report = f"📊 仓位WebSocket管理器状态\n"
         report += f"  • 管理器状态: {'🟢 运行中' if self.is_running else '🔴 已停止'}\n"
         report += f"  • 活跃流数量: {len(self.streams)}\n\n"
-
-        for exchange_code, stream in self.streams.items():
-            report += stream.get_status_report() + "\n"
-
         return report.strip()
 
     def get_running_exchanges(self) -> List[str]:

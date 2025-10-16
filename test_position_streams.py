@@ -13,6 +13,8 @@ import sys
 from loguru import logger
 from dotenv import load_dotenv
 
+from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
+
 # 加载环境变量
 load_dotenv()
 
@@ -27,39 +29,23 @@ class PositionStreamTester:
         self.manager = PositionStreamManager()
         self.running = False
 
-    def on_position_update(self, event: PositionEvent):
+    def on_order_update(self, event: OrderUpdateEvent):
         """
-        仓位事件回调函数
+       订单更新事件回调函数
 
         Args:
-            event: 仓位事件
+            event:订单更新事件
         """
         # 基础事件信息
-        logger.info(f"📊 仓位事件 [{event.exchange_code}] {event.symbol}")
-        logger.info(f"   事件类型: {event.event_type.value}")
-        logger.info(f"   当前仓位: {event.position_size}")
-        logger.info(f"   仓位方向: {event.position_side}")
-        logger.info(f"   入场价格: {event.entry_price}")
-        logger.info(f"   标记价格: {event.mark_price}")
-        logger.info(f"   未实现盈亏: {event.unrealized_pnl:.4f}")
-        logger.info(f"   名义价值: {event.notional_value:.2f}")
+        logger.info(f"📊 订单更新事件 [{event.exchange_code}] {event.symbol}")
+        logger.info(f"   订单ID: {event.order_id}")
+        logger.info(f"   订单状态: {event.order_status}")
+        logger.info(f"   订单类型: {event.order_type}")
+        logger.info(f"   订单方向: {event.side}")
+        logger.info(f"   订单数量: {event.original_quantity}")
+        logger.info(f"   订单价格: {event.price}")
+        logger.info(f"   {str(event)}")
 
-        if event.size_change != 0:
-            logger.info(f"   仓位变化: {event.size_change:+.4f}")
-        if event.pnl_change != 0:
-            logger.info(f"   盈亏变化: {event.pnl_change:+.4f}")
-
-        logger.info("-" * 60)
-
-        # 特殊事件处理
-        if event.event_type == PositionEventType.OPEN:
-            logger.success(f"🔓 开仓: {event.get_position_summary()}")
-        elif event.event_type == PositionEventType.CLOSE:
-            logger.warning(f"🔒 平仓: {event.get_position_summary()}")
-        elif event.event_type == PositionEventType.INCREASE:
-            logger.info(f"📈 加仓: {event.get_position_summary()}")
-        elif event.event_type == PositionEventType.DECREASE:
-            logger.info(f"📉 减仓: {event.get_position_summary()}")
 
     async def start_test(self, exchanges: list):
         """
@@ -82,7 +68,7 @@ class PositionStreamTester:
 
             # 启动流管理器
             self.running = True
-            success = await self.manager.start_streams(exchanges, self.on_position_update)
+            success = await self.manager.start_streams(exchanges, self.on_order_update)
 
             if not success:
                 logger.error("❌ 无法启动任何仓位流，请检查API配置")

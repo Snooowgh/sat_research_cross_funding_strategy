@@ -35,8 +35,8 @@ class OrderStatusType(Enum):
     EXPIRED_IN_MATCH = "EXPIRED_IN_MATCH"
 
 
-class OrderEvent:
-    """仓位事件数据模型"""
+class OrderUpdateEvent:
+    """订单更新时间模型"""
 
     def __init__(self,
                  exchange_code: str,

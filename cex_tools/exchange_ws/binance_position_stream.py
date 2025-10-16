@@ -13,7 +13,8 @@ import threading
 from loguru import logger
 from typing import Optional, Dict, Any
 
-from cex_tools.exchange_model.order_update_event_model import OrderEvent
+from cex_tools.cex_enum import ExchangeEnum
+from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
 from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
 from cex_tools.exchange_model.position_model import BinancePositionDetail
 from cex_tools.exchange_model.position_event_model import PositionEvent, PositionEventType
@@ -35,7 +36,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             sandbox: 是否使用沙盒环境
             **kwargs: 其他配置参数
         """
-        super().__init__("Binance", kwargs.get('on_position_callback'))
+        super().__init__(ExchangeEnum.BINANCE, **kwargs)
         self.api_key = api_key
         self.secret = secret
         self.sandbox = sandbox
@@ -193,7 +194,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             # 转换订单状态
             status_str = data.get('X', 'NEW')
             # 创建订单事件
-            return OrderEvent(
+            event = OrderUpdateEvent(
                 exchange_code=self.exchange_code,
                 symbol=data.get('s', ''),
                 client_order_id=data.get('c', ''),
@@ -211,6 +212,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 position_side=data.get('ps', False),
                 timestamp=data.get('T', 0)
             )
+            self.on_order_update_callback(event)
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 处理订单更新数据异常: {e}, data: {data}")
             return None
@@ -222,7 +224,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
         Args:
             data: ACCOUNT_UPDATE消息数据
         """
-        pass
+        self.on_account_callback(data)
 
     def _handle_websocket_message(self, message: str):
         """
@@ -232,7 +234,6 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             message: WebSocket消息字符串
         """
         try:
-            print(message)
             data = json.loads(message)
             event_type = data.get('e')
 
@@ -240,7 +241,6 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 # 账户更新消息，包含仓位信息
                 logger.debug(f"[{self.exchange_code}] 收到账户更新消息")
                 self._handle_account_update(data.get('a', {}))
-
             elif event_type == 'ORDER_TRADE_UPDATE':
                 # 订单更新消息，暂时不处理
                 logger.debug(f"[{self.exchange_code}] 收到Order更新消息")
@@ -432,20 +432,3 @@ class BinancePositionWebSocket(PositionWebSocketStream):
             self.listen_key = None
 
         logger.success(f"[{self.exchange_code}] 仓位WebSocket已停止")
-
-    def get_status_report(self) -> str:
-        """获取状态报告"""
-        base_report = super().get_status_report()
-
-        # 添加Binance特有的状态信息
-        status = f"\n  • 连接状态: {'🟢 运行中' if self._running else '🔴 已停止'}"
-        status += f"\n  • 仓位数: {len(self._last_positions)}"
-        status += f"\n  • 环境: {'沙盒' if self.sandbox else '生产'}"
-        status += f"\n  • Listen Key: {'已获取' if self.listen_key else '未获取'}"
-        status += f"\n  • 最后更新: {time.time() - self._last_update_time:.1f}秒前" if self._last_update_time > 0 else "\n  • 最后更新: 尚未更新"
-
-        # 添加当前仓位列表
-        if self._last_positions:
-            status += f"\n  • 当前仓位:"
-            status += str(self._last_positions)
-        return base_report + status
