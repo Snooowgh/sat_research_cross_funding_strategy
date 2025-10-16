@@ -239,25 +239,45 @@ class MultiExchangeCombinedInfoModel:
             list: 仓位对象列表
         """
         positions = []
-
-        for exchange_info in self.exchange_infos:
-            for pos in exchange_info.positions:
-                if pos.symbol == symbol and (exchange_codes is None or pos.exchange_code in exchange_codes):
-                    positions.append(pos)
+        if exchange_codes is None:
+            for exchange_info in self.exchange_infos:
+                for pos in exchange_info.positions:
+                    if pos.symbol == symbol:
+                        positions.append(pos)
+        else:
+            # and (exchange_codes is None or pos.exchange_code in exchange_codes)
+            for exchange_code in exchange_codes:
+                for exchange_info in self.exchange_infos:
+                    if exchange_info.exchange_code == exchange_code:
+                        has_pos = False
+                        for pos in exchange_info.positions:
+                            if pos.symbol == symbol:
+                                positions.append(pos)
+                                has_pos = True
+                        if not has_pos:
+                            positions.append(None)
         return positions
 
     def get_pos_imbalanced_value(self, symbol: str, exchange_codes: List[str] = None):
         positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
         value = 0
         for pos in positions_list:
-            value += pos.positionAmt * pos.entryPrice
+            if pos is None:
+                amt = 0
+            else:
+                amt = pos.positionAmt
+            value += amt * pos.entryPrice
         return value
 
     def get_pos_imbalanced_amt(self, symbol: str, exchange_codes: List[str] = None):
         positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
         value = 0
         for pos in positions_list:
-            value += pos.positionAmt
+            if pos is None:
+                amt = 0
+            else:
+                amt = pos.positionAmt
+            value += amt
         return value
 
     def merge_positions(self):

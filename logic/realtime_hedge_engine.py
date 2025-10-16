@@ -1276,15 +1276,10 @@ class RealtimeHedgeEngine:
         # 分发给所有引擎进程
         self.exchange_combined_info_cache['risk_data'] = risk_data
         self.exchange_combined_info_cache['update_time'] = update_time
-        position_list = risk_data.get_symbol_exchange_positions(self.symbol,
+        self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
-        if len(position_list) >= 2:
-            self._position1 = position_list[0]
-            self._position2 = position_list[1]
+        if self._position1 or self._position2:
             await self._auto_balance_position()
-        else:
-            self._position1 = None
-            self._position2 = None
 
     async def stop(self):
         """停止引擎"""
