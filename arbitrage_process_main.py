@@ -113,7 +113,7 @@ async def _update_shared_engine_stats(risk_data_dict: Dict, engine, engine_confi
             logger.debug(f"获取价差费率信息失败: {e}")
 
         # 计算平均交易额
-        average_trade_amount = stats['cum_volume'] / (stats['trade_count'] if stats['trade_count'] > 0 else 0.0)
+        average_trade_amount = (stats['cum_volume'] / stats['trade_count']) if stats['trade_count'] > 0 else 0.0
 
         # 更新共享字典
         if 'engine_stats' not in risk_data_dict:
