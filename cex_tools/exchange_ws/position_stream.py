@@ -32,6 +32,10 @@ class PositionWebSocketStream(ABC):
         self._running = False
         self._last_update_time = 0
 
+    def set_order_update_callback(self, call_back):
+        self.on_order_update_callback = call_back
+
+
     @abstractmethod
     async def start(self):
         """启动 WebSocket 连接"""
