@@ -238,6 +238,7 @@ class BinanceFuture(UMFutures):
                 self.cancel_order(symbol=symbol, orderId=order["orderId"])
 
     def make_new_order(self, symbol, side, order_type, quantity, price, msg="", **kwargs):
+        symbol = self.convert_symbol(symbol)
         pair_info = self.get_pair_info(symbol)
         order_type = order_type.upper()
         side = side.upper()
@@ -289,10 +290,12 @@ class BinanceFuture(UMFutures):
         return response
 
     def get_recent_order(self, binance_symbol, orderId=None):
+        binance_symbol = self.convert_symbol(binance_symbol)
         cnt = 5
         for _ in range(cnt):
             try:
-                all_orders = self.get_all_orders(binance_symbol, orderId=orderId, recvWindow=self.recvWindow)
+                all_orders = self.get_all_orders(binance_symbol, orderId=orderId, recvWindow=self.recvWindow,
+                                                 limit=3)
                 if orderId is None:
                     return BinanceOrder(all_orders[-1])
                 else:
@@ -304,6 +307,7 @@ class BinanceFuture(UMFutures):
                 continue
 
     def cancel_order(self, symbol, orderId):
+        symbol = self.convert_symbol(symbol)
         return super().cancel_order(symbol, orderId)
         # return UMFutures.cancel_order(self, symbol, orderId)
 
@@ -341,8 +345,7 @@ class BinanceFuture(UMFutures):
                 return cached_rate
 
         # 缓存未命中，使用原接口
-        if symbol.endswith("USDT") is False and symbol.endswith("USDC") is False:
-            symbol = f"{symbol}USDT"
+        symbol = self.convert_symbol(symbol)
         info = self.mark_price(symbol)
         info = float(info["lastFundingRate"])
         interval = self.ccxt_exchange.fetch_funding_interval(self.__convert_to_ccxt_symbol(symbol))["interval"]
@@ -353,9 +356,11 @@ class BinanceFuture(UMFutures):
             return info
 
     def get_order_books(self, symbol, limit=20):
+        symbol = self.convert_symbol(symbol)
         return BinanceOrderBook(self.depth(symbol, limit=limit))
 
     def get_open_interest(self, symbol, usd=True):
+        symbol = self.convert_symbol(symbol)
         info = self.open_interest(symbol)
         r = float(info["openInterest"])
         if usd:
@@ -389,6 +394,7 @@ class BinanceFuture(UMFutures):
         return withdraw_result
 
     def create_stoploss_order(self, symbol, side, amount, stopPrice):
+        symbol = self.convert_symbol(symbol)
         ret = self.ccxt_exchange.create_stop_market_order(symbol, side, amount, stopPrice)
         logger.info(f"止损止盈单: {symbol} {side} {amount} {stopPrice}")
         logger.info(ret)
@@ -465,11 +471,8 @@ class BinanceFuture(UMFutures):
         Returns:
             FundingRateHistoryResponse: 历史资金费率响应对象
         """
+        symbol = self.convert_symbol(symbol)
         try:
-            # 确保symbol格式正确
-            if not symbol.endswith("USDT") and not symbol.endswith("USDC"):
-                symbol = f"{symbol}USDT"
-
             # 调用Binance API获取历史资金费率
             params = {
                 "symbol": symbol,
@@ -532,6 +535,7 @@ class BinanceFuture(UMFutures):
         Returns:
             FundingHistoryResponse: 用户资金费历史响应对象
         """
+        symbol = self.convert_symbol(symbol)
         try:
             # 构建查询参数
             params = {
@@ -540,9 +544,6 @@ class BinanceFuture(UMFutures):
             }
 
             if symbol:
-                # 确保symbol格式正确
-                if not symbol.endswith("USDT") and not symbol.endswith("USDC"):
-                    symbol = f"{symbol}USDT"
                 params["symbol"] = symbol
 
             if start_time:

@@ -9,6 +9,8 @@
 import asyncio
 from typing import Dict, List, Optional, Any, Union
 from loguru import logger
+
+from cex_tools.exchange_model.order_model import BaseOrderModel
 from utils.coroutine_utils import safe_execute_async
 
 from cex_tools.base_exchange import BaseExchange
@@ -125,9 +127,9 @@ class AsyncExchangeAdapter:
         """获取订单列表"""
         return await self._call_method('get_orders', symbol, **kwargs)
 
-    async def get_recent_order(self, symbol: str, **kwargs) -> Dict:
+    async def get_recent_order(self, symbol: str, orderId=None, **kwargs) -> BaseOrderModel:
         """获取最近订单"""
-        return await self._call_method('get_recent_order', symbol, **kwargs)
+        return await self._call_method('get_recent_order', symbol, orderId=orderId, **kwargs)
 
     async def get_history_order(self, symbol: str, **kwargs) -> List[Dict]:
         """获取历史订单"""

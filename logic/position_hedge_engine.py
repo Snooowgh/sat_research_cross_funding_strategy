@@ -6,10 +6,12 @@
 @Description : 仓位对冲引擎，监听两个交易所的订单更新，自动执行对冲交易
 @Time        : 2025/10/16
 """
+import time
 from typing import Dict, Optional, Callable, Set
 from loguru import logger
 from dataclasses import dataclass
 
+from cex_tools.exchange_model.order_model import BaseOrderModel
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent, OrderStatusType, OrderType
 from cex_tools.async_exchange_adapter import AsyncExchangeAdapter
 from utils.notify_tools import async_notify_telegram
@@ -63,7 +65,15 @@ class PositionHedgeEngine:
             'total_hedges': 0,
             'successful_hedges': 0,
             'failed_hedges': 0,
-            'total_hedge_volume': 0.0
+            'total_hedge_volume': 0.0,
+            'total_price_difference': 0.0,
+            'total_slippage': 0.0,
+            'total_delay_ms': 0.0,
+            'avg_price_difference': 0.0,
+            'avg_slippage': 0.0,
+            'avg_delay_ms': 0.0,
+            'profitable_hedges': 0,
+            'loss_hedges': 0
         }
 
         logger.info(f"🚀 初始化仓位对冲引擎: {self.exchange1_code} <-> {self.exchange2_code}")
@@ -112,7 +122,8 @@ class PositionHedgeEngine:
                                    symbol: str,
                                    side: str,
                                    amount: float,
-                                   last_filled_price: float) -> Optional[Dict]:
+                                   last_filled_price: float,
+                                   event) -> Optional[Dict]:
         """
         执行对冲订单
 
@@ -121,13 +132,18 @@ class PositionHedgeEngine:
             symbol: 交易对
             side: 订单方向
             amount: 订单数量
+            last_filled_price: 原始成交价格
+            event: 原始订单事件
 
         Returns:
             Dict: 订单结果，失败返回None
         """
         try:
-            logger.info(f"🎯 执行对冲订单: {target_exchange.exchange_code} {symbol} {side} {amount}")
+            # 记录开始时间
+            hedge_start_time = time.time()
 
+            logger.info(f"🎯 执行对冲订单: {target_exchange.exchange_code} {symbol} {side} {amount}")
+            
             # 下市价对冲单
             order_result = await target_exchange.make_new_order(
                 symbol=symbol,
@@ -137,12 +153,46 @@ class PositionHedgeEngine:
                 price=last_filled_price
             )
 
+            # 计算订单执行延迟
+            hedge_end_time = time.time()
+            delay_ms = (hedge_end_time - hedge_start_time) * 1000
+
             if order_result:
+                orderId = order_result["orderId"]
+                order_info = await target_exchange.get_recent_order(symbol, orderId)
                 self.stats['successful_hedges'] += 1
                 self.stats['total_hedge_volume'] += amount
 
+                # 从订单结果中提取实际成交价格
+                hedge_price = order_info.avgPrice
+
+                # 计算价差和收益率
+                price_difference = self._calculate_price_difference(
+                    last_filled_price, hedge_price, event.side, side
+                )
+
+                # 计算滑点
+                slippage = self._calculate_slippage(
+                    last_filled_price, hedge_price, event.side, side
+                )
+
+                # 计算收益/亏损
+                profit_usd = price_difference * amount
+                is_profitable = profit_usd > 0
+
+                # 更新统计数据
+                self._update_hedge_stats(
+                    price_difference, slippage, delay_ms, is_profitable
+                )
+
                 logger.success(f"✅ 对冲订单成功: {target_exchange.exchange_code} {symbol} {side} {amount}")
-                logger.debug(f"📄 订单结果: {order_result}")
+                logger.info(f"📊 对冲执行详情:")
+                logger.info(f"   原始价格: {last_filled_price}")
+                logger.info(f"   对冲价格: {hedge_price}")
+                logger.info(f"   价差: {price_difference:.6f}")
+                logger.info(f"   滑点: {slippage:.6f}")
+                logger.info(f"   延迟: {delay_ms:.2f}ms")
+                logger.info(f"   收益: {profit_usd:.6f} USD ({'盈利' if is_profitable else '亏损'})")
 
                 return order_result
             else:
@@ -165,6 +215,131 @@ class PositionHedgeEngine:
                 f"错误: {str(e)}"
             )
             return None
+
+    def _extract_hedge_price(self, order_result: BaseOrderModel, fallback_price: float) -> float:
+        """
+        从订单结果中提取实际成交价格
+
+        Args:
+            order_result: 订单结果
+            fallback_price: 备用价格
+
+        Returns:
+            float: 实际成交价格
+        """
+        try:
+
+            # 尝试从不同字段提取价格
+            if isinstance(order_result, dict):
+                # 尝试获取平均价格
+                if 'avgPrice' in order_result and order_result['avgPrice']:
+                    return float(order_result['avgPrice'])
+
+                # 尝试获取成交价格
+                if 'price' in order_result and order_result['price']:
+                    return float(order_result['price'])
+
+                # 尝试从成交详情中获取
+                if 'fills' in order_result and order_result['fills']:
+                    first_fill = order_result['fills'][0]
+                    if 'price' in first_fill:
+                        return float(first_fill['price'])
+
+                # 尝试从其他常见字段获取
+                for field in ['executedPrice', 'filledPrice', 'executionPrice']:
+                    if field in order_result and order_result[field]:
+                        return float(order_result[field])
+
+            logger.warning(f"无法从订单结果中提取价格，使用备用价格: {fallback_price}")
+            return fallback_price
+
+        except Exception as e:
+            logger.warning(f"提取价格时出错: {e}，使用备用价格: {fallback_price}")
+            return fallback_price
+
+    def _calculate_price_difference(self, original_price: float, hedge_price: float,
+                                   original_side: str, hedge_side: str) -> float:
+        """
+        计算价差（原始价格 - 对冲价格）
+
+        Args:
+            original_price: 原始成交价格
+            hedge_price: 对冲价格
+            original_side: 原始订单方向
+            hedge_side: 对冲方向
+
+        Returns:
+            float: 价差
+        """
+        # 对冲方向与原始方向相反，所以价差计算方式为：
+        # 如果原始是买入，对冲是卖出，价差 = 对冲价格 - 原始价格
+        # 如果原始是卖出，对冲是买入，价差 = 原始价格 - 对冲价格
+        if original_side == "BUY" and hedge_side == "SELL":
+            return hedge_price - original_price
+        elif original_side == "SELL" and hedge_side == "BUY":
+            return original_price - hedge_price
+        else:
+            # 异常情况，简单返回差值
+            return hedge_price - original_price
+
+    def _calculate_slippage(self, original_price: float, hedge_price: float,
+                           original_side: str, hedge_side: str) -> float:
+        """
+        计算滑点（相对于原始价格的百分比）
+
+        Args:
+            original_price: 原始成交价格
+            hedge_price: 对冲价格
+            original_side: 原始订单方向
+            hedge_side: 对冲方向
+
+        Returns:
+            float: 滑点百分比（正数表示不利滑点）
+        """
+        if original_price == 0:
+            return 0.0
+
+        price_diff = hedge_price - original_price
+        slippage_percent = (price_diff / original_price) * 100
+
+        # 对于对冲交易，我们关注不利滑点
+        if original_side == "BUY" and hedge_side == "SELL":
+            # 买入后卖出，希望价格越高越好，负数是不利滑点
+            return abs(min(0, slippage_percent))
+        elif original_side == "SELL" and hedge_side == "BUY":
+            # 卖出后买入，希望价格越低越好，正数是不利滑点
+            return max(0, slippage_percent)
+        else:
+            return abs(slippage_percent)
+
+    def _update_hedge_stats(self, price_difference: float, slippage: float,
+                           delay_ms: float, is_profitable: bool):
+        """
+        更新对冲统计数据
+
+        Args:
+            price_difference: 价差
+            slippage: 滑点
+            delay_ms: 延迟（毫秒）
+            is_profitable: 是否盈利
+        """
+        successful_hedges = self.stats['successful_hedges']
+
+        # 更新总量统计
+        self.stats['total_price_difference'] += price_difference
+        self.stats['total_slippage'] += slippage
+        self.stats['total_delay_ms'] += delay_ms
+
+        # 更新平均统计
+        self.stats['avg_price_difference'] = self.stats['total_price_difference'] / successful_hedges
+        self.stats['avg_slippage'] = self.stats['total_slippage'] / successful_hedges
+        self.stats['avg_delay_ms'] = self.stats['total_delay_ms'] / successful_hedges
+
+        # 更新盈亏统计
+        if is_profitable:
+            self.stats['profitable_hedges'] += 1
+        else:
+            self.stats['loss_hedges'] += 1
 
     async def _handle_order_update(self, event: OrderUpdateEvent):
         """
@@ -212,7 +387,7 @@ class PositionHedgeEngine:
 
                 # 执行对冲订单
                 await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
-                                                last_filled_price)
+                                                last_filled_price, event)
 
                 self.stats['total_hedges'] += 1
 
