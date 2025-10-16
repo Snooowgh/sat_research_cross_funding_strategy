@@ -16,6 +16,8 @@ import hashlib
 import hmac
 import base64
 
+from cex_tools.cex_enum import ExchangeEnum
+from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
 from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
 from cex_tools.exchange_model.position_model import OkxPositionDetail
 from cex_tools.exchange_model.position_event_model import PositionEventType
@@ -36,7 +38,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             sandbox: 是否使用沙盒环境
             **kwargs: 其他配置参数
         """
-        super().__init__("OKX", kwargs.get('on_position_callback'))
+        super().__init__(ExchangeEnum.OKX, **kwargs)
         self.api_key = api_key
         self.secret = secret
         self.passphrase = passphrase
@@ -59,7 +61,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
         self._login_sent = False
 
     def _generate_signature(self, timestamp: str, method: str = "GET",
-                           request_path: str = "/users/self/verify") -> str:
+                            request_path: str = "/users/self/verify") -> str:
         """
         生成API签名
 
@@ -146,7 +148,6 @@ class OkxPositionWebSocket(PositionWebSocketStream):
         """
         try:
             event = message.get("event")
-
             if event == "login":
                 # 登录响应
                 code = message.get("code")
@@ -157,22 +158,27 @@ class OkxPositionWebSocket(PositionWebSocketStream):
                     await self._send_subscription_message()
                 else:
                     logger.error(f"[{self.exchange_code}] 登录失败: {message.get('msg')}")
-
             elif event == "subscribe":
                 # 订阅响应
                 channel = message.get("arg", {}).get("channel")
-                if channel == "positions":
-                    logger.info(f"[{self.exchange_code}] {channel} 订阅成功")
-                else:
-                    logger.error(f"[{self.exchange_code}] {channel} 订阅失败: {message.get('msg')}")
-
+                logger.info(f"[{self.exchange_code}] {channel} 订阅成功")
             elif message.get("arg", {}).get("channel") == "positions":
                 # 仓位数据更新
                 data = message.get("data", [])
                 if data:
                     logger.debug(f"[{self.exchange_code}] 收到 {len(data)} 个仓位更新")
                     await self._handle_positions_update(data)
-
+            elif message.get("arg", {}).get("channel") == "orders":
+                # 仓位数据更新
+                data = message.get("data", [])
+                logger.debug(f"[{self.exchange_code}] 收到{len(data)}个订单更新")
+                for d in data:
+                    await self._handle_orders_update(d)
+            elif message.get("arg", {}).get("channel") == "account":
+                # 仓位数据更新
+                data = message.get("data", None)
+                logger.debug(f"[{self.exchange_code}] 收到账户更新")
+                await self._handle_account_update(data)
             elif message.get("op") == "error":
                 # 错误消息
                 logger.error(f"[{self.exchange_code}] 收到错误消息: {message}")
@@ -181,7 +187,36 @@ class OkxPositionWebSocket(PositionWebSocketStream):
                 logger.debug(f"[{self.exchange_code}] 未知消息类型: {message}")
 
         except Exception as e:
-            logger.error(f"[{self.exchange_code}] 处理消息异常: {e}")
+            logger.exception(f"[{self.exchange_code}] 处理消息异常: {e}")
+
+    async def _handle_orders_update(self, order_data):
+        """
+            {'instType': 'SWAP', 'instId': 'ETH-USDT-SWAP', 'tgtCcy': '', 'ccy': 'USDT', 'tradeQuoteCcy': '', 'ordId': '2956222619053072384', 'clOrdId': '', 'algoClOrdId': '', 'algoId': '', 'tag': '', 'px': '3900', 'sz': '0.01', 'notionalUsd': '3.9009750000000007', 'ordType': 'limit', 'side': 'buy', 'posSide': 'net', 'tdMode': 'cross', 'accFillSz': '0', 'fillNotionalUsd': '', 'avgPx': '0', 'state': 'canceled', 'lever': '0', 'pnl': '0', 'feeCcy': 'USDT', 'fee': '0', 'rebateCcy': 'USDT', 'rebate': '0', 'category': 'normal', 'uTime': '1760604892870', 'cTime': '1760604699542', 'source': '', 'reduceOnly': 'false', 'cancelSource': '1', 'quickMgnType': '', 'stpId': '', 'stpMode': 'cancel_taker', 'attachAlgoClOrdId': '', 'lastPx': '3993.13', 'isTpLimit': 'false', 'slTriggerPx': '', 'slTriggerPxType': '', 'tpOrdPx': '', 'tpTriggerPx': '', 'tpTriggerPxType': '', 'slOrdPx': '', 'fillPx': '', 'tradeId': '', 'fillSz': '0', 'fillTime': '', 'fillPnl': '0', 'fillFee': '0', 'fillFeeCcy': '', 'execType': '', 'fillPxVol': '', 'fillPxUsd': '', 'fillMarkVol': '', 'fillFwdPx': '', 'fillMarkPx': '', 'fillIdxPx': '', 'amendSource': '', 'reqId': '', 'amendResult': '', 'code': '0', 'msg': '', 'pxType': '', 'pxUsd': '', 'pxVol': '', 'linkedAlgoOrd': {'algoId': ''}, 'attachAlgoOrds': []}
+        """
+        logger.info(f"订单更新:{order_data}")
+        event = OrderUpdateEvent(
+            exchange_code=self.exchange_code,
+            symbol=order_data.get('instId', '').replace("-USDT-SWAP", ""),
+            client_order_id=order_data.get('clOrdId', ''),
+            order_id=order_data.get('ordId', ''),
+            side=order_data.get('side', '').upper(),
+            order_type=order_data.get('ordType', '').upper(),
+            original_quantity=float(order_data.get('sz', 0)), # sheet_amt转换
+            price=float(order_data.get('px', 0)),
+            avg_price=float(order_data.get('avgPx', 0)),
+            order_status=order_data.get('state', '').upper(),
+            order_last_filled_quantity=float(order_data.get('fillSz', 0)),
+            order_filled_accumulated_quantity=float(order_data.get('accFillSz', 0)),
+            last_filled_price=float(order_data.get('fillPx') if order_data.get('fillPx') else 0),
+            reduce_only=order_data.get('reduceOnly', 'false') == 'true',
+            position_side_mode=order_data.get('posSide', ''),
+            timestamp=int(order_data.get('uTime', 0))
+        )
+        self.on_order_update_callback(event)
+
+    async def _handle_account_update(self, account_data):
+        # logger.info(f"账户数据更新:{account_data}")
+        self.on_account_callback(account_data)
 
     async def _handle_positions_update(self, positions_data: list):
         """
@@ -227,7 +262,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
 
                 # 转换为标准格式
                 position_detail = self._convert_okx_position(position_data)
-                self._on_position_update(position_detail)
+                self.on_position_callback(position_detail)
 
         except Exception as e:
             logger.error(f"[{self.exchange_code}] 处理仓位更新异常: {e}")
@@ -266,9 +301,9 @@ class OkxPositionWebSocket(PositionWebSocketStream):
                     logger.debug(f"[{self.exchange_code}] 重连私有数据流 (第{retry_count}次)")
 
                 async with websockets.connect(
-                    self.private_ws_url,
-                    ping_interval=20,
-                    ping_timeout=5
+                        self.private_ws_url,
+                        ping_interval=20,
+                        ping_timeout=5
                 ) as websocket:
                     self._ws_connection = websocket
                     logger.debug(f"[{self.exchange_code}] WebSocket 连接成功")
@@ -357,5 +392,4 @@ class OkxPositionWebSocket(PositionWebSocketStream):
                 await self._listen_task
             except asyncio.CancelledError:
                 pass
-
-        logger.debug(f"[{self.exchange_code}] 仓位WebSocket 已停止")
+        logger.debug(f"[{self.exchange_code}] WebSocket 已停止")

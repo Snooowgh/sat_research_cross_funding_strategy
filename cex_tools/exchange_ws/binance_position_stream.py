@@ -17,10 +17,7 @@ from cex_tools.cex_enum import ExchangeEnum
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
 from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
 from cex_tools.exchange_model.position_model import BinancePositionDetail
-from cex_tools.exchange_model.position_event_model import PositionEvent, PositionEventType
 from binance.um_futures import UMFutures
-
-from cex_tools.exchange_model.order_update_event_model import OrderType, OrderStatusType
 
 
 class BinancePositionWebSocket(PositionWebSocketStream):
@@ -209,7 +206,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 order_filled_accumulated_quantity=float(data.get('z', 0)),
                 last_filled_price=float(data.get('L', 0)),
                 reduce_only=data.get('R', False),
-                position_side=data.get('ps', False),
+                position_side_mode=data.get('ps', ''),
                 timestamp=data.get('T', 0)
             )
             self.on_order_update_callback(event)

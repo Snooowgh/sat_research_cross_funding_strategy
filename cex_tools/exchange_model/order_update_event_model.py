@@ -53,7 +53,7 @@ class OrderUpdateEvent:
                  order_filled_accumulated_quantity,
                  last_filled_price,
                  reduce_only,
-                 position_side,
+                 position_side_mode,
                  timestamp):
         """
             Binance:
@@ -89,7 +89,7 @@ class OrderUpdateEvent:
         # 是否只减仓
         self.reduce_only = reduce_only
         # 仓位方向（多仓/空仓）
-        self.position_side = position_side
+        self.position_side_mode = position_side_mode
         # 事件时间戳
         self.timestamp = timestamp
 
@@ -100,4 +100,4 @@ class OrderUpdateEvent:
                 f"avg_price={self.avg_price}, "
                 f"order_status={self.order_status}, filled_quantity={self.order_filled_accumulated_quantity}, "
                 f"last_filled_price={self.last_filled_price}, "
-                f"reduce_only={self.reduce_only}, position_side={self.position_side}, timestamp={self.timestamp})")
+                f"reduce_only={self.reduce_only}, position_side={self.position_side_mode}, timestamp={self.timestamp})")

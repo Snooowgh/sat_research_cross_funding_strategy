@@ -97,36 +97,6 @@ class PositionStreamTester:
         finally:
             await self.stop_test()
 
-    async def _monitor_status(self):
-        """状态监控任务"""
-        while self.running:
-            try:
-                await asyncio.sleep(30)  # 每30秒报告一次状态
-
-                if self.running:
-                    report = self.manager.get_status_report()
-                    logger.info("📈 状态报告:")
-                    for line in report.split('\n'):
-                        logger.info(f"   {line}")
-
-                    # 统计总开仓数和总盈亏
-                    open_positions = 0
-                    total_pnl = 0.0
-
-                    for stream in self.manager.streams.values():
-                        positions = stream.get_open_positions()
-                        open_positions += len(positions)
-                        for pos in positions.values():
-                            total_pnl += getattr(pos, 'unRealizedProfit', 0)
-
-                    logger.info(f"📊 总开仓数: {open_positions}, 总盈亏: {total_pnl:.4f}")
-                    logger.info("-" * 60)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"❌ 状态监控异常: {e}")
-
     async def _wait_for_shutdown(self):
         """等待关闭信号"""
         # 创建一个永不完成的future，等待外部中断
@@ -152,9 +122,9 @@ async def main():
     """主函数"""
     # 默认测试的交易所（根据你的环境变量配置调整）
     test_exchanges = [
-        'binance',
+        # 'binance',
         # 'hyperliquid',
-        # 'okx',
+        'okx',
         # 'bybit',
         # 'lighter'
     ]
