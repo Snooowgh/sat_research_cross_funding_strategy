@@ -154,10 +154,15 @@ class OkxFuture:
         return OkxOrderBook(self.market.get_books(instId=self.convert_symbol(symbol), sz=limit)["data"])
 
     def get_klines(self, symbol, interval, limit=500):
-        data = self.market.get_history_candle_latest(instId=self.convert_symbol(symbol), length=limit, bar=interval)[
-            "data"]
-        # 时间从前往后排
-        return [OkxKlineBar(d) for d in data]
+        # logger.warning(f"OKX Klines 调用: {symbol} {interval} {limit} ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ")
+        try:
+            data = self.market.get_history_candle_latest(instId=self.convert_symbol(symbol), length=limit, bar=interval)[
+                "data"]
+            # 时间从前往后排
+            return [OkxKlineBar(d) for d in data]
+        except Exception as e:
+            logger.warning(f"OKX Klines 异常: {symbol} {interval} {limit} ❌❌❌❌❌ {e}")
+            return []
 
     def get_total_margin(self, total_eq=False):
         data = self.account.get_balances()["data"]

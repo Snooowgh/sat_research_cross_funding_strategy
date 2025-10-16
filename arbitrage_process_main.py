@@ -401,6 +401,7 @@ class MultiProcessArbitrageManager:
         self.arbitrage_param: Optional[MultiExchangeArbitrageParam] = None
         self.is_running = False
         self.shutdown_event = asyncio.Event()
+        self._is_shutting_down = False  # 防止重复关闭
 
         # 多进程管理
         self.process_manager = mp.Manager()
@@ -674,9 +675,11 @@ class MultiProcessArbitrageManager:
             logger.debug(f"🔄 风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
             self.last_risk_update_time = time.time()
 
-            should, msg = self.cached_risk_data.should_notify_risk()
-            if should:
-                await async_notify_telegram(f"❌❌ {','.join(list(self.arbitrage_param.async_exchanges.keys()))}风控提醒:\n{msg}")
+            # 只有在非关闭状态下才发送风控通知
+            if not self._is_shutting_down:
+                should, msg = self.cached_risk_data.should_notify_risk()
+                if should:
+                    await async_notify_telegram(f"❌❌ {','.join(list(self.arbitrage_param.async_exchanges.keys()))}风控提醒:\n{msg}")
             # 分发给所有引擎进程
             self.shared_risk_data['risk_data'] = self.cached_risk_data
             self.shared_risk_data['update_time'] = time.time()
@@ -1097,9 +1100,17 @@ class MultiProcessArbitrageManager:
 
     async def shutdown(self):
         """优雅关闭管理器"""
+        # 防止重复执行shutdown
+        if self._is_shutting_down:
+            logger.info("🛑 shutdown()已在执行中，跳过重复调用")
+            return
+
+        self._is_shutting_down = True
+        logger.info("🛑 开始优雅关闭管理器...")
+
         # 关闭前再次检查仓位信息
         await self._update_risk_data()
-        await async_notify_telegram(str(self.cached_risk_data), channel_type=CHANNEL_TYPE.TRADE)
+
         self.is_running = False
         self.shutdown_event.set()
 
@@ -1147,8 +1158,8 @@ class MultiProcessArbitrageManager:
             except Exception as e:
                 logger.error(f"❌ 关闭 {process_key} 引擎进程失败: {e}")
 
-        # 发送最终统计报告
-        await self._send_final_report()
+        # 发送最终统计报告（包含最终风控数据）
+        await self._send_final_report_with_risk_data()
 
         # 清理所有资源
         self.engine_processes.clear()
@@ -1186,6 +1197,32 @@ class MultiProcessArbitrageManager:
         except Exception as e:
             logger.error(f"❌ 发送最终报告失败: {e}")
 
+    async def _send_final_report_with_risk_data(self):
+        """发送最终运行报告（包含最终风控数据）"""
+        if not self.config.enable_notifications:
+            return
+
+        try:
+            runtime_minutes = int((time.time() - self.stats.get('start_time', time.time())) / 60)
+
+            # 统计健康数据
+            healthy_engines = len([h for h in self.engine_health.values() if h.is_healthy])
+
+            # 合并报告和风控数据到一条消息
+            combined_message = (
+                f"🏁 套利管理器运行报告\n"
+                f"⏱️  总运行时长: {runtime_minutes} 分钟\n"
+                f"🚀 总启动次数: {self.stats['total_engines_started']}\n"
+                f"💚 健康引擎: {healthy_engines}/{len(self.engine_health)}\n"
+                f"👋 管理器已优雅关闭\n\n"
+                f"📊 最终仓位信息:\n{self.cached_risk_data}"
+            )
+
+            await async_notify_telegram(combined_message, channel_type=CHANNEL_TYPE.TRADE)
+
+        except Exception as e:
+            logger.error(f"❌ 发送最终报告失败: {e}")
+
 
 # 主程序入口
 async def main():
@@ -1206,21 +1243,10 @@ async def main():
             return
 
         signal_received = True
-        logger.info(f"👋 收到停止信号 {signum}，立即开始关闭程序...")
+        logger.info(f"👋 收到停止信号 {signum}，开始关闭程序...")
         shutdown_requested.set()
-        # 立即触发管理器关闭
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(manager.shutdown())
-            else:
-                # 如果事件循环还没运行，设置标志位让主循环检查
-                logger.info("事件循环未运行，设置停止标志")
-                manager.shutdown_event.set()
-        except Exception as e:
-            logger.warning(f"设置关闭任务时出现异常: {e}")
-            # 至少设置标志位
-            manager.shutdown_event.set()
+        # 只设置标志位，让主循环统一处理shutdown，避免重复调用
+        manager.shutdown_event.set()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -1256,14 +1282,18 @@ async def main():
 
     except KeyboardInterrupt:
         logger.info("👋 收到键盘中断信号，正在关闭...")
-        try:
-            await asyncio.wait_for(manager.shutdown(), timeout=10)
-        except asyncio.TimeoutError:
-            logger.error("❌ 键盘中断关闭超时，强制退出")
-            return
+        # KeyboardInterrupt时，如果shutdown还没执行过，才执行
+        if not manager._is_shutting_down:
+            try:
+                await asyncio.wait_for(manager.shutdown(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.error("❌ 键盘中断关闭超时，强制退出")
+                return
     except Exception as e:
         logger.error(f"❌ 程序异常退出: {e}")
-        await manager.shutdown()
+        # 异常退出时，如果shutdown还没执行过，才执行
+        if not manager._is_shutting_down:
+            await manager.shutdown()
 
 
 if __name__ == "__main__":

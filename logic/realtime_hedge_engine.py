@@ -40,7 +40,7 @@ class RiskConfig:
     """风控配置"""
     max_orderbook_age_sec: float = 1.0  # 订单簿最大过期时间（秒）
     max_spread_pct: float = 0.0015  # 最大买卖价差（0.15%）
-    min_liquidity_usd: float = 1000  # 最小流动性（美元）
+    min_liquidity_usd: float = 500  # 最小流动性（美元）
     min_profit_rate: float = 0.0005  # 开仓时最小价差收益率（0.05%）
     reduce_pos_min_profit_rate: float = -0.001  # 平仓时最小价差收益率（0.1%）
     liquidity_depth_levels: int = 10  # 流动性检查深度层级
@@ -147,7 +147,11 @@ class RealtimeHedgeEngine:
         self.symbol = trade_config.pair1.replace("USDT", "")
         self.exchange_code_list = [exchange1.exchange_code, exchange2.exchange_code]
         self.exchange_pair = f"{exchange1.exchange_code}-{exchange2.exchange_code}"
-        self.taker_fee_rate = exchange1.taker_fee_rate + exchange2.taker_fee_rate
+        if self.trade_config.trade_mode == TradeMode.LIMIT_TAKER:
+            self.taker_fee_rate = exchange1.maker_fee_rate + exchange2.taker_fee_rate
+            self.taker_fee_rate = max(exchange1.taker_fee_rate + exchange2.maker_fee_rate, self.taker_fee_rate)
+        else:
+            self.taker_fee_rate = exchange1.taker_fee_rate + exchange2.taker_fee_rate
         self.risk_config = risk_config or RiskConfig()
         if self.trade_config.daemon_mode is True and exchange_combined_info_cache is None:
             raise Exception("持续运行模式必须提供 exchange_combined_info_cache 用于风控检查")
@@ -332,9 +336,8 @@ class RealtimeHedgeEngine:
 
         if not price1 or not price2:
             raise Exception(f"无法获取限价单价格: price1={price1}, price2={price2}")
-
+        await self._cancel_all_orders()
         logger.info(f"🎯 {self.symbol} {self.exchange_pair} 下限价单: {amount:.4f} @ {price1}/{price2}")
-
         # 并发下限价单
         order1_task = asyncio.create_task(
             self._place_limit_order_exchange1(self.trade_config.pair1, signal.side1, amount, price1, reduceOnly=(not signal.is_add_position()))
@@ -371,7 +374,7 @@ class RealtimeHedgeEngine:
             result = await exchange.cancel_all_orders(pair)
             return result
         except Exception as e:
-            logger.warning(f"取消所有订单失败 {exchange.exchange_code} {pair}")
+            logger.warning(f"取消所有订单失败 {exchange.exchange_code} {pair} {e}")
             raise e
         
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
@@ -1248,8 +1251,8 @@ class RealtimeHedgeEngine:
                 await use_exchange.make_new_order(self.trade_config.pair1,
                                                 side,
                                                 order_type="MARKET",
-                                                quantity=trade_amt,
-                                                  price=mid_price, reduceOnly=True)
+                                                amount=trade_amt,
+                                                price=mid_price, reduceOnly=True)
                 text = (f"⚠️ {self._position1.pair}({use_exchange.exchange_code}) {side} "
                         f"自动平衡仓位, 减仓:  {imbalance_amt} ${imbalance_value:.4f}")
             except Exception as e:

@@ -240,7 +240,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
                 await self._handle_account_update(data.get('a', {}))
             elif event_type == 'ORDER_TRADE_UPDATE':
                 # 订单更新消息，暂时不处理
-                logger.debug(f"[{self.exchange_code}] 收到Order更新消息")
+                # logger.debug(f"[{self.exchange_code}] 收到Order更新消息")
                 await self._handle_order_update(data.get('o', {}))
             elif event_type == 'MARGIN_CALL':
                 # 保证金催缴消息
@@ -300,7 +300,7 @@ class BinancePositionWebSocket(PositionWebSocketStream):
 
                         except asyncio.TimeoutError:
                             # 超时，发送ping（websockets库会自动处理ping）
-                            logger.debug(f"[{self.exchange_code}] WebSocket接收超时")
+                            # logger.debug(f"[{self.exchange_code}] WebSocket接收超时")
                             continue
                         except Exception as e:
                             if self._running:

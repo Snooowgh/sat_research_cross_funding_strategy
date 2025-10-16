@@ -498,5 +498,5 @@ class OkxPositionWebSocket(PositionWebSocketStream):
 
         ct_val = self._get_contract_value(symbol)
         currency_amount = contract_amount * ct_val
-        logger.debug(f"[{self.exchange_code}] 转换合约张数: {symbol} {contract_amount}张 -> {currency_amount}币 (ctVal={ct_val})")
+        # logger.debug(f"[{self.exchange_code}] 转换合约张数: {symbol} {contract_amount}张 -> {currency_amount}币 (ctVal={ct_val})")
         return currency_amount
