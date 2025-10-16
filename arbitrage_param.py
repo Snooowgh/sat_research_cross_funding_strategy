@@ -24,7 +24,7 @@ class ArbitrageWhiteListParam:
         # "ETH",
         # "SOL",
         "HYPE",
-        "PUMP",
+        # "PUMP",
         # "DOGE",
         # "AAVE",
         # "UNI",
@@ -32,11 +32,11 @@ class ArbitrageWhiteListParam:
         # "ASTER",
         # "XRP",
         # "BNB",
-        "ENA",
+        # "ENA",
         # "SUI",
         # "AVAX",
         # "LINK",
-        "PENGU",
+        # "PENGU",
         # "WIF"
     ]
 

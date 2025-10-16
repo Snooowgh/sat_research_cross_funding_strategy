@@ -91,17 +91,17 @@ class PositionStreamTester:
             logger.success("✅ 仓位WebSocket流启动成功")
 
             # 启动状态监控任务
-            monitor_task = asyncio.create_task(self._monitor_status())
+            # monitor_task = asyncio.create_task(self._monitor_status())
 
             # 等待中断信号
             await self._wait_for_shutdown()
 
             # 停止监控任务
-            monitor_task.cancel()
-            try:
-                await monitor_task
-            except asyncio.CancelledError:
-                pass
+            # monitor_task.cancel()
+            # try:
+            #     await monitor_task
+            # except asyncio.CancelledError:
+            #     pass
 
         except KeyboardInterrupt:
             logger.info("🛑 收到中断信号，正在停止...")
@@ -167,10 +167,10 @@ async def main():
     # 默认测试的交易所（根据你的环境变量配置调整）
     test_exchanges = [
         'binance',
-        'hyperliquid',
-        'okx',
-        'bybit',
-        'lighter'
+        # 'hyperliquid',
+        # 'okx',
+        # 'bybit',
+        # 'lighter'
     ]
 
     tester = PositionStreamTester()

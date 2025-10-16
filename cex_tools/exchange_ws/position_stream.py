@@ -16,15 +16,15 @@ from cex_tools.exchange_model.position_event_model import PositionEvent, Positio
 class PositionWebSocketStream(ABC):
     """仓位WebSocket流监听器抽象基类"""
 
-    def __init__(self, exchange_name: str, on_position_callback: Callable[[PositionEvent], None]):
+    def __init__(self, exchange_code: str, on_position_callback: Callable[[PositionEvent], None]):
         """
         初始化仓位WebSocket流
 
         Args:
-            exchange_name: 交易所名称
+            exchange_code: 交易所名称
             on_position_callback: 仓位事件回调函数
         """
-        self.exchange_name = exchange_name
+        self.exchange_code = exchange_code
         self.on_position_callback = on_position_callback
         self.latest_positions: Dict[str, any] = {}  # symbol -> position_detail
         self._running = False
@@ -70,8 +70,9 @@ class PositionWebSocketStream(ABC):
         """
         try:
             symbol = getattr(position_detail, 'symbol', '')
+            print(position_detail)
             if not symbol:
-                logger.warning(f"[{self.exchange_name}] 仓位更新缺少symbol信息")
+                logger.warning(f"[{self.exchange_code}] 仓位更新缺少symbol信息")
                 return
 
             # 获取前一次仓位用于比较
@@ -79,8 +80,8 @@ class PositionWebSocketStream(ABC):
 
             # 自动检测事件类型
             if event_type is None and previous_position:
-                prev_size = getattr(previous_position, 'positionAmt', 0)
-                curr_size = getattr(position_detail, 'positionAmt', 0)
+                prev_size = getattr(previous_position, 'pos', 0)
+                curr_size = getattr(position_detail, 'pos', 0)
                 event_type = PositionEvent.detect_event_type(prev_size, curr_size)
             elif event_type is None:
                 event_type = PositionEventType.UPDATE
@@ -91,7 +92,7 @@ class PositionWebSocketStream(ABC):
 
             # 创建仓位事件
             position_event = PositionEvent.create_from_position_detail(
-                exchange_code=self.exchange_name,
+                exchange_code=self.exchange_code,
                 position_detail=position_detail,
                 previous_position=previous_position,
                 event_type=event_type
@@ -101,10 +102,10 @@ class PositionWebSocketStream(ABC):
             try:
                 self.on_position_callback(position_event)
             except Exception as e:
-                logger.error(f"[{self.exchange_name}] 仓位回调异常: {e}")
+                logger.error(f"[{self.exchange_code}] 仓位回调异常: {e}")
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 处理仓位更新异常: {e}")
+            logger.error(f"[{self.exchange_code}] 处理仓位更新异常: {e}")
 
     def _on_positions_update(self, positions: List[any]):
         """
@@ -142,7 +143,7 @@ class PositionWebSocketStream(ABC):
                     self._on_position_update(empty_position, PositionEventType.CLOSE)
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 批量处理仓位更新异常: {e}")
+            logger.error(f"[{self.exchange_code}] 批量处理仓位更新异常: {e}")
 
     def get_status_report(self) -> str:
         """获取状态报告"""
@@ -150,7 +151,7 @@ class PositionWebSocketStream(ABC):
         open_positions = len(self.get_open_positions())
         total_positions = len(self.latest_positions)
 
-        report = f"📊 {self.exchange_name} 仓位WebSocket流状态:\n"
+        report = f"📊 {self.exchange_code} 仓位WebSocket流状态:\n"
         report += f"  • 连接状态: {'🟢 运行中' if self._running else '🔴 已停止'}\n"
         report += f"  • 仓位总数: {total_positions}\n"
         report += f"  • 开仓数量: {open_positions}\n"
@@ -174,13 +175,13 @@ class PositionWebSocketStream(ABC):
         """获取仓位摘要"""
         open_positions = self.get_open_positions()
         if not open_positions:
-            return f"{self.exchange_name}: 无开仓"
+            return f"{self.exchange_code}: 无开仓"
 
         total_pnl = sum(getattr(pos, 'unRealizedProfit', 0) for pos in open_positions.values())
         long_count = sum(1 for pos in open_positions.values() if getattr(pos, 'positionAmt', 0) > 0)
         short_count = sum(1 for pos in open_positions.values() if getattr(pos, 'positionAmt', 0) < 0)
 
-        return (f"{self.exchange_name}: {len(open_positions)}个开仓 "
+        return (f"{self.exchange_code}: {len(open_positions)}个开仓 "
                 f"(多:{long_count} 空:{short_count}) 总盈亏:{total_pnl:.4f}")
 
     async def health_check(self) -> bool:

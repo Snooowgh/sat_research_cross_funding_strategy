@@ -57,9 +57,9 @@ class AsterPositionWebSocket(PositionWebSocketStream):
             }
 
             await self._ws_connection.send(json.dumps(auth_msg))
-            logger.debug(f"[{self.exchange_name}] 发送认证消息")
+            logger.debug(f"[{self.exchange_code}] 发送认证消息")
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 发送认证消息失败: {e}")
+            logger.error(f"[{self.exchange_code}] 发送认证消息失败: {e}")
 
     def _generate_signature(self) -> str:
         """
@@ -84,9 +84,9 @@ class AsterPositionWebSocket(PositionWebSocketStream):
             }
 
             await self._ws_connection.send(json.dumps(subscribe_msg))
-            logger.debug(f"[{self.exchange_name}] 发送仓位订阅消息")
+            logger.debug(f"[{self.exchange_code}] 发送仓位订阅消息")
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 发送订阅消息失败: {e}")
+            logger.error(f"[{self.exchange_code}] 发送订阅消息失败: {e}")
 
     async def _handle_message(self, message: dict):
         """
@@ -101,38 +101,38 @@ class AsterPositionWebSocket(PositionWebSocketStream):
             if method == "auth":
                 # 认证响应
                 if message.get("result") is True:
-                    logger.info(f"[{self.exchange_name}] 认证成功")
+                    logger.info(f"[{self.exchange_code}] 认证成功")
                     self._auth_sent = True
                     # 认证成功后发送订阅消息
                     await self._send_subscription_message()
                 else:
-                    logger.error(f"[{self.exchange_name}] 认证失败: {message.get('error')}")
+                    logger.error(f"[{self.exchange_code}] 认证失败: {message.get('error')}")
 
             elif method == "subscribe":
                 # 订阅响应
                 if message.get("result") is True:
-                    logger.info(f"[{self.exchange_name}] 仓位订阅成功")
+                    logger.info(f"[{self.exchange_code}] 仓位订阅成功")
                 else:
-                    logger.error(f"[{self.exchange_name}] 仓位订阅失败: {message.get('error')}")
+                    logger.error(f"[{self.exchange_code}] 仓位订阅失败: {message.get('error')}")
 
             elif message.get("channel") == "positions":
                 # 仓位数据更新
                 data = message.get("data", [])
                 if data:
-                    logger.debug(f"[{self.exchange_name}] 收到 {len(data)} 个仓位更新")
+                    logger.debug(f"[{self.exchange_code}] 收到 {len(data)} 个仓位更新")
                     await self._handle_positions_update(data)
 
             elif method == "ping":
                 # ping消息，回复pong
                 pong_msg = {"method": "pong"}
                 await self._ws_connection.send(json.dumps(pong_msg))
-                logger.debug(f"[{self.exchange_name}] 回复pong")
+                logger.debug(f"[{self.exchange_code}] 回复pong")
 
             else:
-                logger.debug(f"[{self.exchange_name}] 未知消息类型: {method}")
+                logger.debug(f"[{self.exchange_code}] 未知消息类型: {method}")
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 处理消息异常: {e}")
+            logger.error(f"[{self.exchange_code}] 处理消息异常: {e}")
 
     async def _handle_positions_update(self, positions_data: list):
         """
@@ -155,7 +155,7 @@ class AsterPositionWebSocket(PositionWebSocketStream):
                 self._on_position_update(position_detail)
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 处理仓位更新异常: {e}")
+            logger.error(f"[{self.exchange_code}] 处理仓位更新异常: {e}")
 
     def _convert_aster_position(self, position_data: dict) -> BinancePositionDetail:
         """
@@ -182,13 +182,13 @@ class AsterPositionWebSocket(PositionWebSocketStream):
                 "updateTime": position_data.get("timestamp", int(time.time() * 1000))
             }
 
-            return BinancePositionDetail(converted_data, exchange_code=self.exchange_name)
+            return BinancePositionDetail(converted_data, exchange_code=self.exchange_code)
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 转换仓位数据异常: {e}")
+            logger.error(f"[{self.exchange_code}] 转换仓位数据异常: {e}")
             # 返回一个空的仓位对象
             empty_position = BinancePositionDetail({})
-            empty_position.exchange_code = self.exchange_name
+            empty_position.exchange_code = self.exchange_code
             return empty_position
 
     async def _listen_websocket(self):
@@ -199,9 +199,9 @@ class AsterPositionWebSocket(PositionWebSocketStream):
         while self._running:
             try:
                 if retry_count == 0:
-                    logger.debug(f"[{self.exchange_name}] 连接到私有数据流: {self.ws_url}")
+                    logger.debug(f"[{self.exchange_code}] 连接到私有数据流: {self.ws_url}")
                 else:
-                    logger.debug(f"[{self.exchange_name}] 重连私有数据流 (第{retry_count}次)")
+                    logger.debug(f"[{self.exchange_code}] 重连私有数据流 (第{retry_count}次)")
 
                 async with websockets.connect(
                     self.ws_url,
@@ -209,14 +209,14 @@ class AsterPositionWebSocket(PositionWebSocketStream):
                     ping_timeout=5
                 ) as websocket:
                     self._ws_connection = websocket
-                    logger.debug(f"[{self.exchange_name}] WebSocket 连接成功")
+                    logger.debug(f"[{self.exchange_code}] WebSocket 连接成功")
 
                     # 发送认证消息
                     await self._send_auth_message()
 
                     # 重连成功，重置计数器
                     if retry_count > 0:
-                        logger.debug(f"[{self.exchange_name}] 重连成功！")
+                        logger.debug(f"[{self.exchange_code}] 重连成功！")
                     retry_count = 0
                     self._auth_sent = False
 
@@ -228,59 +228,59 @@ class AsterPositionWebSocket(PositionWebSocketStream):
                             await self._handle_message(data)
 
                         except asyncio.TimeoutError:
-                            logger.debug(f"[{self.exchange_name}] WebSocket 超时，发送 ping...")
+                            logger.debug(f"[{self.exchange_code}] WebSocket 超时，发送 ping...")
                             await websocket.ping()
                         except websockets.exceptions.ConnectionClosed:
-                            logger.warning(f"[{self.exchange_name}] WebSocket 连接关闭，准备重连...")
+                            logger.warning(f"[{self.exchange_code}] WebSocket 连接关闭，准备重连...")
                             break
                         except Exception as e:
-                            logger.error(f"[{self.exchange_name}] 处理消息异常: {e}")
+                            logger.error(f"[{self.exchange_code}] 处理消息异常: {e}")
                             break
 
             except Exception as e:
                 if not self._running:
-                    logger.debug(f"[{self.exchange_name}] WebSocket已主动停止")
+                    logger.debug(f"[{self.exchange_code}] WebSocket已主动停止")
                     return
 
                 # 连接失败，重置认证状态
                 self._auth_sent = False
 
                 if "no pong" in str(e) or "ConnectionClosed" in str(type(e).__name__):
-                    logger.warning(f"[{self.exchange_name}] WebSocket连接断开: {e}")
+                    logger.warning(f"[{self.exchange_code}] WebSocket连接断开: {e}")
                 else:
-                    logger.error(f"[{self.exchange_name}] WebSocket 连接异常: {e}")
+                    logger.error(f"[{self.exchange_code}] WebSocket 连接异常: {e}")
 
                 retry_count += 1
 
                 # 等待后重连
                 if self._running:
-                    logger.debug(f"[{self.exchange_name}] {retry_delay}秒后重连...")
+                    logger.debug(f"[{self.exchange_code}] {retry_delay}秒后重连...")
                     await asyncio.sleep(retry_delay)
 
             finally:
                 self._ws_connection = None
                 self._auth_sent = False
 
-        logger.debug(f"[{self.exchange_name}] WebSocket监听线程退出")
+        logger.debug(f"[{self.exchange_code}] WebSocket监听线程退出")
 
     async def start(self):
         """启动 WebSocket 连接"""
         if self._running:
-            logger.warning(f"[{self.exchange_name}] 仓位WebSocket 已在运行")
+            logger.warning(f"[{self.exchange_code}] 仓位WebSocket 已在运行")
             return
 
         if not all([self.api_key, self.secret]):
-            logger.error(f"[{self.exchange_name}] 缺少必要的API凭据，无法启动私有数据流")
+            logger.error(f"[{self.exchange_code}] 缺少必要的API凭据，无法启动私有数据流")
             return
 
-        logger.warning(f"[{self.exchange_name}] Aster仓位WebSocket流是基础实现，可能需要根据实际API调整")
+        logger.warning(f"[{self.exchange_code}] Aster仓位WebSocket流是基础实现，可能需要根据实际API调整")
 
         self._running = True
 
         # 启动监听任务
         self._listen_task = asyncio.create_task(self._listen_websocket())
 
-        logger.debug(f"[{self.exchange_name}] 仓位WebSocket 已启动")
+        logger.debug(f"[{self.exchange_code}] 仓位WebSocket 已启动")
 
     async def stop(self):
         """停止 WebSocket 连接"""
@@ -298,4 +298,4 @@ class AsterPositionWebSocket(PositionWebSocketStream):
             except asyncio.CancelledError:
                 pass
 
-        logger.debug(f"[{self.exchange_name}] 仓位WebSocket 已停止")
+        logger.debug(f"[{self.exchange_code}] 仓位WebSocket 已停止")

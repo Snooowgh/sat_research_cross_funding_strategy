@@ -60,9 +60,9 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
             }
 
             await self._ws_connection.send(json.dumps(subscribe_msg))
-            logger.debug(f"[{self.exchange_name}] 发送用户数据订阅消息")
+            logger.debug(f"[{self.exchange_code}] 发送用户数据订阅消息")
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 发送订阅消息失败: {e}")
+            logger.error(f"[{self.exchange_code}] 发送订阅消息失败: {e}")
 
     async def _handle_message(self, message: dict):
         """
@@ -79,10 +79,10 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
                 # 订阅响应
                 method = data.get("method")
                 subscription = data.get("subscription", {})
-                logger.debug(f"[{self.exchange_name}] 订阅响应: {method} - {subscription}")
+                logger.debug(f"[{self.exchange_code}] 订阅响应: {method} - {subscription}")
 
                 if subscription.get("type") == "user":
-                    logger.info(f"[{self.exchange_name}] 用户数据订阅成功")
+                    logger.info(f"[{self.exchange_code}] 用户数据订阅成功")
                     self._subscription_sent = True
 
             elif channel == "user":
@@ -90,10 +90,10 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
                 await self._handle_user_update(data)
 
             else:
-                logger.debug(f"[{self.exchange_name}] 未知频道: {channel}")
+                logger.debug(f"[{self.exchange_code}] 未知频道: {channel}")
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 处理消息异常: {e}")
+            logger.error(f"[{self.exchange_code}] 处理消息异常: {e}")
 
     async def _handle_user_update(self, data: dict):
         """
@@ -123,11 +123,11 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
         try:
             positions = data.get("positions", [])
             if positions:
-                logger.debug(f"[{self.exchange_name}] 收到 {len(positions)} 个仓位更新")
+                logger.debug(f"[{self.exchange_code}] 收到 {len(positions)} 个仓位更新")
                 self._on_positions_update(positions)
 
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 处理用户更新异常: {e}")
+            logger.error(f"[{self.exchange_code}] 处理用户更新异常: {e}")
 
     def _convert_hyperliquid_position(self, position_data: dict) -> HyperliquidPositionDetail:
         """
@@ -141,13 +141,13 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
         """
         try:
             # 确保exchange_code字段
-            position_data['exchange_code'] = self.exchange_name
-            return HyperliquidPositionDetail(position_data, exchange_code=self.exchange_name)
+            position_data['exchange_code'] = self.exchange_code
+            return HyperliquidPositionDetail(position_data, exchange_code=self.exchange_code)
         except Exception as e:
-            logger.error(f"[{self.exchange_name}] 转换仓位数据异常: {e}")
+            logger.error(f"[{self.exchange_code}] 转换仓位数据异常: {e}")
             # 返回一个空的仓位对象
             empty_position = HyperliquidPositionDetail({})
-            empty_position.exchange_code = self.exchange_name
+            empty_position.exchange_code = self.exchange_code
             return empty_position
 
     async def _listen_websocket(self):
@@ -158,9 +158,9 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
         while self._running:
             try:
                 if retry_count == 0:
-                    logger.debug(f"[{self.exchange_name}] 连接到用户数据流: {self.ws_url}")
+                    logger.debug(f"[{self.exchange_code}] 连接到用户数据流: {self.ws_url}")
                 else:
-                    logger.debug(f"[{self.exchange_name}] 重连用户数据流 (第{retry_count}次)")
+                    logger.debug(f"[{self.exchange_code}] 重连用户数据流 (第{retry_count}次)")
 
                 async with websockets.connect(
                     self.ws_url,
@@ -168,14 +168,14 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
                     ping_timeout=5
                 ) as websocket:
                     self._ws_connection = websocket
-                    logger.debug(f"[{self.exchange_name}] WebSocket 连接成功")
+                    logger.debug(f"[{self.exchange_code}] WebSocket 连接成功")
 
                     # 发送订阅消息
                     await self._send_subscription_message()
 
                     # 重连成功，重置计数器
                     if retry_count > 0:
-                        logger.debug(f"[{self.exchange_name}] 重连成功！")
+                        logger.debug(f"[{self.exchange_code}] 重连成功！")
                     retry_count = 0
                     self._subscription_sent = False
 
@@ -187,45 +187,45 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
                             await self._handle_message(data)
 
                         except asyncio.TimeoutError:
-                            logger.debug(f"[{self.exchange_name}] WebSocket 超时，发送 ping...")
+                            logger.debug(f"[{self.exchange_code}] WebSocket 超时，发送 ping...")
                             await websocket.ping()
                         except websockets.exceptions.ConnectionClosed:
-                            logger.warning(f"[{self.exchange_name}] WebSocket 连接关闭，准备重连...")
+                            logger.warning(f"[{self.exchange_code}] WebSocket 连接关闭，准备重连...")
                             break
                         except Exception as e:
-                            logger.error(f"[{self.exchange_name}] 处理消息异常: {e}")
+                            logger.error(f"[{self.exchange_code}] 处理消息异常: {e}")
                             break
 
             except Exception as e:
                 if not self._running:
-                    logger.debug(f"[{self.exchange_name}] WebSocket已主动停止")
+                    logger.debug(f"[{self.exchange_code}] WebSocket已主动停止")
                     return
 
                 # 连接失败，重置订阅状态
                 self._subscription_sent = False
 
                 if "no pong" in str(e) or "ConnectionClosed" in str(type(e).__name__):
-                    logger.warning(f"[{self.exchange_name}] WebSocket连接断开: {e}")
+                    logger.warning(f"[{self.exchange_code}] WebSocket连接断开: {e}")
                 else:
-                    logger.error(f"[{self.exchange_name}] WebSocket 连接异常: {e}")
+                    logger.error(f"[{self.exchange_code}] WebSocket 连接异常: {e}")
 
                 retry_count += 1
 
                 # 等待后重连
                 if self._running:
-                    logger.debug(f"[{self.exchange_name}] {retry_delay}秒后重连...")
+                    logger.debug(f"[{self.exchange_code}] {retry_delay}秒后重连...")
                     await asyncio.sleep(retry_delay)
 
             finally:
                 self._ws_connection = None
                 self._subscription_sent = False
 
-        logger.debug(f"[{self.exchange_name}] WebSocket监听线程退出")
+        logger.debug(f"[{self.exchange_code}] WebSocket监听线程退出")
 
     async def start(self):
         """启动 WebSocket 连接"""
         if self._running:
-            logger.warning(f"[{self.exchange_name}] 仓位WebSocket 已在运行")
+            logger.warning(f"[{self.exchange_code}] 仓位WebSocket 已在运行")
             return
 
         self._running = True
@@ -233,7 +233,7 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
         # 启动监听任务
         self._listen_task = asyncio.create_task(self._listen_websocket())
 
-        logger.debug(f"[{self.exchange_name}] 仓位WebSocket 已启动")
+        logger.debug(f"[{self.exchange_code}] 仓位WebSocket 已启动")
 
     async def stop(self):
         """停止 WebSocket 连接"""
@@ -251,4 +251,4 @@ class HyperliquidPositionWebSocket(PositionWebSocketStream):
             except asyncio.CancelledError:
                 pass
 
-        logger.debug(f"[{self.exchange_name}] 仓位WebSocket 已停止")
+        logger.debug(f"[{self.exchange_code}] 仓位WebSocket 已停止")

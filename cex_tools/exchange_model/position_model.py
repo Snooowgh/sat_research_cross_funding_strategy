@@ -15,10 +15,10 @@ class BinancePositionDetail(BaseModel):
         self.exchange_code = exchange_code
         self.adl = int(binance_position.get("adl") or 0)  # 1~5
         self.entryPrice = float(binance_position.get("entryPrice"))  # "0.00000",
-        self.breakEvenPrice = float(binance_position.get("breakEvenPrice"))  # "0.0",
+        self.breakEvenPrice = float(binance_position.get("breakEvenPrice", 0))  # "0.0",
         self.marginType = binance_position.get("marginType")  # "isolated",
         self.isAutoAddMargin = binance_position.get("isAutoAddMargin")  # "false",
-        self.isolatedMargin = float(binance_position.get("isolatedMargin"))  # "0.00000000",
+        self.isolatedMargin = float(binance_position.get("isolatedMargin", 0))  # "0.00000000",
         # self.leverage = float(binance_position.get("leverage"))  # "10",
         self.liquidationPrice = float(binance_position.get("liquidationPrice"))  # "0",
         self.fundingFee = 0
@@ -26,7 +26,7 @@ class BinancePositionDetail(BaseModel):
         # self.maxNotionalValue = float(binance_position.get("maxNotionalValue"))  # "20000000",
         self.positionAmt = float(binance_position.get("positionAmt"))  # "0.000",
         self.notional = float(binance_position.get("notional"))  # "0", ,
-        self.isolatedWallet = float(binance_position.get("isolatedWallet"))  # "0",
+        self.isolatedWallet = float(binance_position.get("isolatedWallet", 0))  # "0",
         self.pair = binance_position.get("symbol")  # "BTCUSDT",
         self.symbol = self.pair.replace("USDT", "")
         self.unRealizedProfit = float(binance_position.get("unRealizedProfit"))  # "0.00000000",
