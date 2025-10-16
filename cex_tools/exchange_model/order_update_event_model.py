@@ -99,5 +99,7 @@ class OrderUpdateEvent:
                 f"order_type={self.order_type}, quantity={self.original_quantity}, price={self.price}, "
                 f"avg_price={self.avg_price}, "
                 f"order_status={self.order_status}, filled_quantity={self.order_filled_accumulated_quantity}, "
+                f"order_last_filled_quantity={self.order_last_filled_quantity}, "
+                f"order_filled_accumulated_quantity={self.order_filled_accumulated_quantity}, "
                 f"last_filled_price={self.last_filled_price}, "
                 f"reduce_only={self.reduce_only}, position_side={self.position_side_mode}, timestamp={self.timestamp})")
