@@ -208,7 +208,7 @@ class OkxFuture:
     def get_orders_by_type(self, symbol, order_type=None):
         pass
 
-    def cancel_all_orders(self, symbol=None, order_type=None):
+    def cancel_all_orders(self, symbol=None):
         get_orders_pending = self.trade.get_orders_pending()
         if symbol is not None:
             for order in get_orders_pending["data"]:

@@ -230,7 +230,7 @@ class BinanceFuture(UMFutures):
     def get_history_order(self, pair):
         pass
 
-    def cancel_all_orders(self, symbol, limit=3):
+    def cancel_all_orders(self, symbol, limit=10):
         all_orders = self.get_all_orders(symbol=symbol, limit=limit, recvWindow=self.recvWindow)
         for order in all_orders:
             if order["status"] not in [BinanceOrderStatus.FILLED, BinanceOrderStatus.CANCELED,

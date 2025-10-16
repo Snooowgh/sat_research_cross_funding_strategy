@@ -123,6 +123,10 @@ class AsyncExchangeAdapter:
         """取消订单"""
         return await self._call_method('cancel_order', symbol, order_id)
 
+    async def cancel_all_orders(self, symbol: str, **kwargs) -> Dict:
+        """取消订单"""
+        return await self._call_method('cancel_all_orders', symbol, **kwargs)
+
     async def get_orders(self, symbol: str, **kwargs) -> List[Dict]:
         """获取订单列表"""
         return await self._call_method('get_orders', symbol, **kwargs)

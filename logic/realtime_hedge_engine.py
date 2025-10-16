@@ -22,11 +22,18 @@ from rich.prompt import FloatPrompt, Confirm
 from cex_tools.exchange_ws.orderbook_stream import OrderBookStream, OrderBookData
 from cex_tools.cex_enum import TradeSide
 from config.env_config import env_config
+from enum import Enum
 from logic.strategy_math import calculate_zscore, infer_optimal_spread_by_zscore
 from utils.decorators import async_timed_cache
 from utils.math_utils import align_with_decimal
 from utils.notify_tools import async_notify_telegram, CHANNEL_TYPE
 
+
+class TradeMode(Enum):
+    """交易模式枚举"""
+    TAKER_TAKER = "taker_taker"  # 原有的taker-taker模式
+    LIMIT_TAKER = "limit_taker"  # 新增的limit-taker模式
+    
 
 @dataclass
 class RiskConfig:
@@ -65,6 +72,7 @@ class TradeConfig:
     max_order_value_usd: float = 500.0  # 单笔最大订单金额（美元）
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
+    trade_mode: TradeMode = TradeMode.TAKER_TAKER  # 交易模式
 
 
 @dataclass
@@ -174,6 +182,9 @@ class RealtimeHedgeEngine:
         self._initial_min_profit_rate = risk_config.user_min_profit_rate
         # 无交易最多下调多少次最小收益率
         self._reduce_min_profit_rate_cnt = 0
+
+        # LIMIT-TAKER模式下的挂单状态管理
+        self._last_signal: Optional[TradeSignal] = None  # 最后一次有效的交易信号
 
     async def update_exchange_info_helper(self):
         raise Exception("未传参！!")
@@ -290,6 +301,79 @@ class RealtimeHedgeEngine:
                           self._latest_orderbook2.mid_price)
         return current_spread
 
+    def _get_limit_price(self, orderbook: OrderBookData, side: str, level: int = 0) -> Optional[float]:
+        """
+        获取限价单价格
+
+        :param orderbook: 订单簿数据
+        :param side: 交易方向 ("BUY" 或 "SELL")
+        :param level: 档位层级 (0=一档, 1=二档)
+        :return: 限价单价格
+        """
+        if side == TradeSide.BUY:
+            if orderbook.bids and len(orderbook.bids) > level:
+                return float(orderbook.bids[level][0])
+        else:
+            if orderbook.asks and len(orderbook.asks) > level:
+                return float(orderbook.asks[level][0])
+        return None
+
+    async def _place_limit_orders(self, signal: TradeSignal, amount: float):
+        """
+        在 LIMIT-TAKER 模式下同时下两个限价单
+
+        :param signal: 交易信号
+        :param amount: 交易数量
+        :return: (order1, order2) 两个订单的结果
+        """
+        # 获取限价单价格（使用一档价格）
+        price1 = self._get_limit_price(self._latest_orderbook1, signal.side1, 0)
+        price2 = self._get_limit_price(self._latest_orderbook2, signal.side2, 0)
+
+        if not price1 or not price2:
+            raise Exception(f"无法获取限价单价格: price1={price1}, price2={price2}")
+
+        logger.info(f"🎯 {self.symbol} {self.exchange_pair} 下限价单: {amount:.4f} @ {price1}/{price2}")
+
+        # 并发下限价单
+        order1_task = asyncio.create_task(
+            self._place_limit_order_exchange1(self.trade_config.pair1, signal.side1, amount, price1, reduceOnly=(not signal.is_add_position()))
+        )
+        order2_task = asyncio.create_task(
+            self._place_limit_order_exchange2(self.trade_config.pair2, signal.side2, amount, price2, reduceOnly=(not signal.is_add_position()))
+        )
+
+        order1, order2 = await asyncio.gather(order1_task, order2_task)
+
+        return order1, order2
+
+    async def _cancel_all_orders(self):
+        """
+        取消所有活跃的挂单
+        """
+        logger.info(f"🚫 {self.symbol} {self.exchange_pair} 取消所有挂单")
+
+        cancel_task1 = asyncio.create_task(self._cancel_order(self.exchange1, self.trade_config.pair1))
+        cancel_task2 = asyncio.create_task(self._cancel_order(self.exchange2, self.trade_config.pair2))
+        cancel_tasks = [cancel_task1, cancel_task2]
+
+        # 等待所有取消操作完成
+        await asyncio.gather(*cancel_tasks, return_exceptions=True)
+
+    async def _cancel_order(self, exchange, pair: str):
+        """
+        取消单个订单
+
+        :param exchange: 交易所对象
+        :param pair: 交易对
+        """
+        try:
+            result = await exchange.cancel_all_orders(pair)
+            return result
+        except Exception as e:
+            logger.warning(f"取消所有订单失败 {exchange.exchange_code} {pair}")
+            raise e
+        
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
         """
         Daemon模式下的Z-Score价差策略
@@ -615,95 +699,124 @@ class RealtimeHedgeEngine:
         :param amount: 交易数量
         """
         try:
-            logger.info(f"🔨 {self.symbol} {self.exchange_pair} 执行对冲交易: {amount:.4f}(${amount*signal.price1:.2f}) @ {signal.price1}/{signal.price2} "
-                        f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
-            logger.debug(signal)
-            if time.time() - signal.signal_generate_start_time > 0.050:
-                logger.error(f"❌❌ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms 过大, 拒绝交易")
-                return
-            elif time.time() - signal.signal_generate_start_time > 0.010:
-                # > 10ms 记录警告日志
-                logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms")
-            # 并发下单（传入参考价格）
-            order1_task = asyncio.create_task(
-                self._place_order_exchange1(self.trade_config.pair1, signal.side1, amount, signal.price1, reduceOnly=(not signal.is_add_position()))
-            )
-            order2_task = asyncio.create_task(
-                self._place_order_exchange2(self.trade_config.pair2, signal.side2, amount, signal.price2, reduceOnly=(not signal.is_add_position()))
-            )
-
-            # 等待两个订单都完成
-            order1, order2 = await asyncio.gather(order1_task, order2_task)
-
-            # 等待订单成交
-            await asyncio.sleep(0.1)
-
-            # 获取成交均价
-            order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
-            order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
-
-            # 计算实际价差收益
-            actual_spread = order1_avg_price - order2_avg_price
-            if signal.side1 == TradeSide.BUY:
-                spread_profit = -actual_spread * amount
+            # 根据交易模式执行不同逻辑
+            if self.trade_config.trade_mode == TradeMode.LIMIT_TAKER:
+                await self._execute_limit_taker_trade(signal, amount)
             else:
-                spread_profit = actual_spread * amount
-
-            # 更新统计
-            self._trade_count += 1
-            self._cum_volume += amount * order1_avg_price
-            self._cum_profit += spread_profit
-            self._remaining_amount -= amount
-            if self._remaining_amount > 0:
-                remaining_info = f"剩余 {self._remaining_amount:.4f}"
-            else:
-                remaining_info = ""
-
-            # 更新最后交易时间
-            self._last_trade_time = time.time()
-            executed_spread_profit_rate = spread_profit / (amount * order1_avg_price)
-            trade_msg = (f"✅ {self.symbol} {self.exchange_pair} 交易完成 #{self._trade_count}: "
-                        f"成交价 {order1_avg_price:.2f}/{order2_avg_price:.2f} "
-                        f"收益 ${spread_profit:.2f} ({executed_spread_profit_rate:.4%}) "
-                        f"累计 ${self._cum_volume:.2f} (${self._cum_profit:.2f}){remaining_info}")
-            logger.info(trade_msg)
-            await async_notify_telegram(f"信号触发:{str(signal)}", channel_type=CHANNEL_TYPE.QUIET)
-            await async_notify_telegram(trade_msg, channel_type=CHANNEL_TYPE.QUIET)
-            # 机会交易有持仓，转为持续交易
-            if self._trade_count == 1 and self.trade_config.daemon_mode and self.trade_config.no_trade_timeout_sec > 0:
-                self.trade_config.no_trade_timeout_sec = 0
-                self.trade_config._timeout_enabled = False
-                logger.info(f"🔄 {self.trade_config.pair1} 建立了仓位，转为持续交易模式")
-
-            # 动态调整最小收益率
-            await self._adjust_min_profit_rate(executed_spread_profit_rate)
-
-            # 判断是否需要暂停交易
-            is_add_position = signal.is_add_position()
-            use_min_profit_rate = self.risk_config.min_profit_rate if is_add_position else self.risk_config.reduce_pos_min_profit_rate
-            delay_time = (use_min_profit_rate - executed_spread_profit_rate) / abs(
-                use_min_profit_rate)
-            delay_time = min(delay_time, 3)  # 最多暂停3min
-            if delay_time > 0:
-                logger.info(
-                    f"⚠️ 价差收益率 {executed_spread_profit_rate:.2%} < {use_min_profit_rate:.2%}"
-                    f"暂停交易{int(delay_time * 60)}s")
-                try:
-                    await asyncio.sleep(int(60 * delay_time))
-                except KeyboardInterrupt:
-                    logger.info("🚧 人工终止暂停")
-                    new_min_profit_rate = FloatPrompt.ask("修改最小价差收益率?",
-                                                          default=self.risk_config.min_profit_rate)
-                    if new_min_profit_rate != self.risk_config.min_profit_rate:
-                        min_profit_rate = new_min_profit_rate
-                        print(f"🚀 修改最小价差收益率: {min_profit_rate:.2%}")
-                    if not Confirm.ask("是否继续执行交易?", default=True):
-                        raise Exception("用户终止交易")
+                await self._execute_taker_taker_trade(signal, amount)
 
         except Exception as e:
             if "用户终止交易" not in str(e):
                 logger.error(f"❌ 交易执行异常: {e}")
                 raise e
+
+    async def _execute_taker_taker_trade(self, signal: TradeSignal, amount: float):
+        """
+        执行原有的 TAKER-TAKER 模式交易
+        """
+        logger.info(f"🔨 {self.symbol} {self.exchange_pair} 执行TAKER-TAKER对冲交易: {amount:.4f}(${amount*signal.price1:.2f}) @ {signal.price1}/{signal.price2} "
+                    f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
+        logger.debug(signal)
+        if time.time() - signal.signal_generate_start_time > 0.050:
+            logger.error(f"❌❌ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms 过大, 拒绝交易")
+            return
+        elif time.time() - signal.signal_generate_start_time > 0.010:
+            # > 10ms 记录警告日志
+            logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 交易前总耗时: {signal.delay_ms():.2f}ms")
+
+        # 并发下单（传入参考价格）
+        order1_task = asyncio.create_task(
+            self._place_order_exchange1(self.trade_config.pair1, signal.side1, amount, signal.price1, reduceOnly=(not signal.is_add_position()))
+        )
+        order2_task = asyncio.create_task(
+            self._place_order_exchange2(self.trade_config.pair2, signal.side2, amount, signal.price2, reduceOnly=(not signal.is_add_position()))
+        )
+
+        # 等待两个订单都完成
+        order1, order2 = await asyncio.gather(order1_task, order2_task)
+
+        # 等待订单成交
+        await asyncio.sleep(0.1)
+
+        # 获取成交均价
+        order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
+        order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
+
+        # 计算实际价差收益
+        actual_spread = order1_avg_price - order2_avg_price
+        if signal.side1 == TradeSide.BUY:
+            spread_profit = -actual_spread * amount
+        else:
+            spread_profit = actual_spread * amount
+
+        # 更新统计
+        self._trade_count += 1
+        self._cum_volume += amount * order1_avg_price
+        self._cum_profit += spread_profit
+        self._remaining_amount -= amount
+        if self._remaining_amount > 0:
+            remaining_info = f"剩余 {self._remaining_amount:.4f}"
+        else:
+            remaining_info = ""
+
+        # 更新最后交易时间
+        self._last_trade_time = time.time()
+        executed_spread_profit_rate = spread_profit / (amount * order1_avg_price)
+        trade_msg = (f"✅ {self.symbol} {self.exchange_pair} TAKER-TAKER交易完成 #{self._trade_count}: "
+                    f"成交价 {order1_avg_price:.2f}/{order2_avg_price:.2f} "
+                    f"收益 ${spread_profit:.2f} ({executed_spread_profit_rate:.4%}) "
+                    f"累计 ${self._cum_volume:.2f} (${self._cum_profit:.2f}){remaining_info}")
+        logger.info(trade_msg)
+        await async_notify_telegram(f"信号触发:{str(signal)}", channel_type=CHANNEL_TYPE.QUIET)
+        await async_notify_telegram(trade_msg, channel_type=CHANNEL_TYPE.QUIET)
+
+        # 机会交易有持仓，转为持续交易
+        if self._trade_count == 1 and self.trade_config.daemon_mode and self.trade_config.no_trade_timeout_sec > 0:
+            self.trade_config.no_trade_timeout_sec = 0
+            self.trade_config._timeout_enabled = False
+            logger.info(f"🔄 {self.trade_config.pair1} 建立了仓位，转为持续交易模式")
+
+        # 动态调整最小收益率
+        await self._adjust_min_profit_rate(executed_spread_profit_rate)
+
+        # 判断是否需要暂停交易
+        is_add_position = signal.is_add_position()
+        use_min_profit_rate = self.risk_config.min_profit_rate if is_add_position else self.risk_config.reduce_pos_min_profit_rate
+        delay_time = (use_min_profit_rate - executed_spread_profit_rate) / abs(use_min_profit_rate)
+        delay_time = min(delay_time, 3)  # 最多暂停3min
+        if delay_time > 0:
+            logger.info(
+                f"⚠️ 价差收益率 {executed_spread_profit_rate:.2%} < {use_min_profit_rate:.2%}"
+                f"暂停交易{int(delay_time * 60)}s")
+            try:
+                await asyncio.sleep(int(60 * delay_time))
+            except KeyboardInterrupt:
+                logger.info("🚧 人工终止暂停")
+                new_min_profit_rate = FloatPrompt.ask("修改最小价差收益率?",
+                                                      default=self.risk_config.min_profit_rate)
+                if new_min_profit_rate != self.risk_config.min_profit_rate:
+                    min_profit_rate = new_min_profit_rate
+                    print(f"🚀 修改最小价差收益率: {min_profit_rate:.2%}")
+                if not Confirm.ask("是否继续执行交易?", default=True):
+                    raise Exception("用户终止交易")
+
+    async def _execute_limit_taker_trade(self, signal: TradeSignal, amount: float):
+        """
+        执行 LIMIT-TAKER 模式交易
+        """
+        logger.info(f"🎯 {self.symbol} {self.exchange_pair} 执行LIMIT-TAKER对冲交易: {amount:.4f} "
+                    f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
+        logger.debug(signal)
+
+        # 下限价单
+        order1, order2 = await self._place_limit_orders(signal, amount)
+        # 更新最后信号时间
+        self._last_signal = signal
+
+        limit_msg = (f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER限价单已挂: "
+                    f"订单1: {order1.get('orderId', 'N/A')} 订单2: {order2.get('orderId', 'N/A')} "
+                    f"数量: {amount:.4f} 信号: {signal.spread_rate:.4%}")
+        logger.info(limit_msg)
 
     async def _place_order_exchange1(self, pair: str, side: str, amount: float, price: float, reduceOnly):
         """在交易所1下单（异步接口）"""
@@ -712,6 +825,14 @@ class RealtimeHedgeEngine:
     async def _place_order_exchange2(self, pair: str, side: str, amount: float, price: float, reduceOnly):
         """在交易所2下单（异步接口）"""
         return await self.exchange2.make_new_order(pair, side, "MARKET", amount, price=price, reduceOnly=reduceOnly)
+
+    async def _place_limit_order_exchange1(self, pair: str, side: str, amount: float, price: float, reduceOnly):
+        """在交易所1下限价单（异步接口）"""
+        return await self.exchange1.make_new_order(pair, side, "LIMIT", amount, price=price, reduceOnly=reduceOnly)
+
+    async def _place_limit_order_exchange2(self, pair: str, side: str, amount: float, price: float, reduceOnly):
+        """在交易所2下限价单（异步接口）"""
+        return await self.exchange2.make_new_order(pair, side, "LIMIT", amount, price=price, reduceOnly=reduceOnly)
 
     async def _adjust_min_profit_rate(self, executed_profit_rate: float):
         """
@@ -1014,6 +1135,13 @@ class RealtimeHedgeEngine:
                         f"⚠️ {self.symbol} {self.exchange_pair} 风控检查: {signal.delay_ms():.2f}ms")
 
                 if not passed:
+                    # LIMIT-TAKER模式：信号不满足时取消所有挂单
+                    if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
+                        self._last_signal):
+                        logger.info(f"🚫 {self.symbol} {self.exchange_pair} 信号不满足，取消所有挂单: {msg}")
+                        await self._cancel_all_orders()
+                        self._last_signal = None
+
                     # 不满足条件，记录日志但继续寻找机会（避免刷屏）
                     if "收益率不足" in msg:
                         if self._should_log_waiting():
