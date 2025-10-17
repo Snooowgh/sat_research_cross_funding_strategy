@@ -136,11 +136,11 @@ class BinanceUnifiedFuture:
             return None
 
     @timed_cache(timeout=3)
-    def get_balance_list_cache(self) -> List[Dict]:
+    def get_balance_list_cache(self):
         """获取账户余额缓存"""
         try:
             # 根据账户类型选择合适的端点
-            balance = self.rest_client.account_balance().data()
+            balance = self.rest_client.account_balance().data().actual_instance
             return balance
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取余额失败: {e}")
@@ -151,9 +151,9 @@ class BinanceUnifiedFuture:
         try:
             balance_list = self.get_balance_list_cache()
             for info in balance_list:
-                if info["asset"] == asset:
+                if info.asset == asset:
                     # 统一账户使用availableBalance
-                    return float(info.get("availableBalance", 0))
+                    return float(info.cross_margin_free)
             return 0
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取{asset}可用余额失败: {e}")
@@ -167,8 +167,12 @@ class BinanceUnifiedFuture:
         """获取总保证金"""
         try:
             # 根据账户类型选择合适的端点
-            account_info = self.rest_client.account_balance().data()
-            total_wallet_balance = float(account_info.get("total_wallet_balance", 0))
+            balance_list = self.get_balance_list_cache()
+            total_wallet_balance = 0
+            for info in balance_list:
+                if info.asset in ["USDT", "USDC"]:
+                    # 统一账户使用availableBalance
+                    total_wallet_balance += float(info.total_wallet_balance)
             return total_wallet_balance
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取总保证金失败: {e}")
@@ -362,9 +366,14 @@ if __name__ == '__main__':
     a = BinanceUnifiedFuture(key="JysfgWvPEc04s7SwdNmLscEOAMecCTPNMjr6NCBN3kQPz9lvpRNP44BoG4Z5aOrB",
                             secret="ZGFMevlQlx66pZ6OY4lUmip2G5Lz4zHztSGrhTsq4gOvQIb0UTnhMAn8JrRcIl6H")
     # print(a.get_all_cur_positions())
-    symbol = "BTC"
-    o = a.make_new_order(symbol, "BUY", "LIMIT", 0.001, 105000)
-    print(o)
-    print(a.get_open_orders(symbol))
-    print(a.get_recent_order(symbol, o["orderId"]))
-    print(a.cancel_all_orders(symbol))
+    # 交易相关测试
+    # symbol = "BTC"
+    # o = a.make_new_order(symbol, "BUY", "LIMIT", 0.001, 105000)
+    # print(o)
+    # print(a.get_open_orders(symbol))
+    # print(a.get_recent_order(symbol, o["orderId"]))
+    # print(a.cancel_all_orders(symbol))
+
+    print(a.rest_client.account_balance().data())
+    print(a.get_available_margin())
+    print(a.get_total_margin())
