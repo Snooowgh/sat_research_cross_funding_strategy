@@ -912,8 +912,26 @@ class RealtimeHedgeEngine:
         if self._timeout_enabled:
             logger.info(f"⏱️ {self.symbol} {self.exchange_pair}超时: {self.trade_config.no_trade_timeout_sec}秒")
 
+        # 初始化定时任务相关变量
+        last_risk_check_time = time.time()
+        RISK_CHECK_INTERVAL = 30  # 30秒执行一次风控检查
+
         while self._running and (self._remaining_amount > 0 or self.trade_config.daemon_mode):
             try:
+                # 定时风控检查：每30秒执行一次
+                current_time = time.time()
+                if current_time - last_risk_check_time > RISK_CHECK_INTERVAL:
+                    logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
+                    try:
+                        # 1. 更新仓位信息
+                        await self._update_exchange_info()
+                        # 2. 强制减仓风控检查
+                        if self.trade_config.daemon_mode:
+                            await self.auto_force_reduce_position_to_safe()
+                        last_risk_check_time = current_time
+                    except Exception as e:
+                        logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 定时风控检查异常: {e}")
+
                 if self.trade_config.daemon_mode and not self._get_risk_data():
                     logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 获取风控数据缓存失败... 等待")
                     await asyncio.sleep(1)  # 订单簿数据or 缓存未就绪，短暂等待
@@ -1110,10 +1128,13 @@ class RealtimeHedgeEngine:
 
 
     async def _update_exchange_info(self):
-        risk_data, update_time = await self.update_exchange_info_helper()
-        # 分发给所有引擎进程
-        self.exchange_combined_info_cache['risk_data'] = risk_data
-        self.exchange_combined_info_cache['update_time'] = update_time
+        if self.exchange_combined_info_cache['update_time'] - time.time() > 60:
+            risk_data, update_time = await self.update_exchange_info_helper()
+            # 分发给所有引擎进程
+            self.exchange_combined_info_cache['risk_data'] = risk_data
+            self.exchange_combined_info_cache['update_time'] = update_time
+        else:
+            risk_data = self.exchange_combined_info_cache['risk_data']
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
         if self._position1 or self._position2:
