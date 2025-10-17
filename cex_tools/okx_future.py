@@ -17,7 +17,8 @@ from cex_tools.exchange_model.position_model import OkxPositionDetail
 from cex_tools.exchange_model.order_model import OkxOrder
 from cex_tools.exchange_model.kline_bar_model import OkxKlineBar
 from cex_tools.exchange_model.orderbook_model import OkxOrderBook
-from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, \
+    FundingHistoryResponse
 from cex_tools.funding_rate_cache import FundingRateCache
 from utils.decorators import timed_cache
 from utils.notify_tools import send_slack_message
@@ -157,7 +158,8 @@ class OkxFuture:
     def get_klines(self, symbol, interval, limit=500):
         # logger.warning(f"OKX Klines 调用: {symbol} {interval} {limit} ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ")
         try:
-            data = self.market.get_history_candle_latest(instId=self.convert_symbol(symbol), length=limit, bar=interval)[
+            data = \
+            self.market.get_history_candle_latest(instId=self.convert_symbol(symbol), length=limit, bar=interval)[
                 "data"]
             # 时间从前往后排
             return [OkxKlineBar(d) for d in data]
@@ -218,6 +220,11 @@ class OkxFuture:
     def get_orders_by_type(self, symbol, order_type=None):
         pass
 
+    def get_open_orders(self, symbol, limit=10):
+        symbol = self.convert_symbol(symbol)
+        get_orders_pending = self.trade.get_orders_pending(instId=symbol)
+        return [OkxOrder(o) for o in get_orders_pending["data"]]
+
     def cancel_all_orders(self, symbol=None):
         symbol = self.convert_symbol(symbol)
         get_orders_pending = self.trade.get_orders_pending()
@@ -249,7 +256,7 @@ class OkxFuture:
             price = self.convert_price(symbol, price)
         start_time = time.time()
         trade_side = "buy" if side == TradeSide.BUY else "sell"
-        posSide = "" # 看交易模式-默认单向持仓模式
+        posSide = ""  # 看交易模式-默认单向持仓模式
         # posSide = "net"
         # posSide = "long" if side == TradeSide.BUY else "short"
         set_order_result = self.trade.set_order(
@@ -603,7 +610,7 @@ class OkxFuture:
             return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
 
     def get_funding_history(self, symbol: str = None, limit: int = 100,
-                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+                            start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
         """
         获取用户仓位收取的资金费历史记录
 

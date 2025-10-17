@@ -16,7 +16,8 @@ from cex_tools.exchange_model.position_model import BinancePositionDetail
 from cex_tools.exchange_model.order_model import BinanceOrder, BinanceOrderStatus
 from cex_tools.exchange_model.kline_bar_model import BinanceKlineBar
 from cex_tools.exchange_model.orderbook_model import BinanceOrderBook
-from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, FundingHistoryResponse
+from cex_tools.exchange_model.funding_rate_model import FundingRateHistory, FundingHistory, FundingRateHistoryResponse, \
+    FundingHistoryResponse
 from cex_tools.cex_enum import ExchangeEnum
 from cex_tools.funding_rate_cache import FundingRateCache
 from utils.decorators import timed_cache
@@ -231,6 +232,16 @@ class BinanceFuture(UMFutures):
 
     def get_history_order(self, pair):
         pass
+
+    def get_open_orders(self, symbol, limit=10):
+        symbol = self.convert_symbol(symbol)
+        all_orders = self.get_all_orders(symbol=symbol, limit=limit, recvWindow=self.recvWindow)
+        ret = []
+        for order in all_orders:
+            if order["status"] not in [BinanceOrderStatus.FILLED, BinanceOrderStatus.CANCELED,
+                                       BinanceOrderStatus.EXPIRED]:
+                ret.append(BinanceOrder(order))
+        return ret
 
     def cancel_all_orders(self, symbol, limit=10):
         symbol = self.convert_symbol(symbol)
@@ -525,7 +536,7 @@ class BinanceFuture(UMFutures):
             return FundingRateHistoryResponse(symbol=symbol, limit=limit, total=0)
 
     def get_funding_history(self, symbol: str = None, limit: int = 100,
-                           start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
+                            start_time: int = None, end_time: int = None) -> FundingHistoryResponse:
         """
         获取用户仓位收取的资金费历史记录
 
@@ -568,7 +579,8 @@ class BinanceFuture(UMFutures):
 
             for item in income_data:
                 funding_amount = float(item["income"])  # 正数表示收到，负数表示支付
-                funding_rate = abs(float(item["income"])) / float(item["balance"]) if float(item["balance"]) != 0 else 0.0
+                funding_rate = abs(float(item["income"])) / float(item["balance"]) if float(
+                    item["balance"]) != 0 else 0.0
 
                 funding_data = FundingHistory(
                     symbol=item["symbol"],

@@ -1227,11 +1227,43 @@ class RealtimeHedgeEngine:
             f"🏁 交易进程结束: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
         await self._auto_balance_position()
 
+    async def _has_active_orders(self, exchange, pair: str) -> bool:
+        """
+        检查交易所是否存在活跃挂单
+
+        :param exchange: 交易所对象
+        :param pair: 交易对
+        :return: 是否存在活跃挂单
+        """
+        try:
+            # 获取当前挂单列表
+            open_orders = await exchange.get_open_orders(pair)
+            return len(open_orders) > 0
+        except Exception as e:
+            logger.warning(f"检查{exchange.exchange_code} {pair}挂单状态失败: {e}")
+            # 出错时保守处理，假设有挂单
+            return True
+
     async def _auto_balance_position(self):
         """
             自动平衡仓位
             - 优先减仓
+            - LIMIT-TAKER模式下有挂单时跳过平衡
         """
+        # LIMIT-TAKER模式下，如果存在最后信号说明可能有挂单，需要检查
+        if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
+            self._last_signal is not None):
+            # 检查两个交易所是否存在活跃挂单
+            has_orders1 = await self._has_active_orders(self.exchange1, self.trade_config.pair1)
+            has_orders2 = await self._has_active_orders(self.exchange2, self.trade_config.pair2)
+
+            if has_orders1 or has_orders2:
+                logger.info(f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER模式下存在活跃挂单，跳过仓位平衡")
+                return
+            else:
+                # 挂单都成交了
+                self._last_signal = None
+
         risk_data = self.exchange_combined_info_cache['risk_data']
         imbalance_value = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
         if abs(imbalance_value) < 50:
