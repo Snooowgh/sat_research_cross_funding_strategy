@@ -266,7 +266,7 @@ class MultiExchangeCombinedInfoModel:
                 amt = 0
             else:
                 amt = pos.positionAmt
-            value += amt * pos.entryPrice
+                value += amt * pos.entryPrice
         return value
 
     def get_pos_imbalanced_amt(self, symbol: str, exchange_codes: List[str] = None):

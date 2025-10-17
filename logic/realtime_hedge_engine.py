@@ -594,11 +594,11 @@ class RealtimeHedgeEngine:
         passed, msg = self._check_spread()
         if not passed:
             return False, msg
-
-        # 3. 检查流动性
-        passed, msg = self._check_liquidity(signal)
-        if not passed:
-            return False, msg
+        #
+        # # 3. 检查流动性
+        # passed, msg = self._check_liquidity(signal)
+        # if not passed:
+        #     return False, msg
 
         # 4. 检查价差收益率
         if signal.is_add_position():
@@ -1017,32 +1017,8 @@ class RealtimeHedgeEngine:
                 # 执行交易
                 await self._execute_trade(signal, trade_amount)
 
-                await self._update_exchange_info()
-
-                await self.auto_force_reduce_position_to_safe()
-
                 # 交易间隔（给市场一点时间恢复）
                 await asyncio.sleep(self.trade_config.trade_interval_sec)
-
-            except KeyboardInterrupt:
-                logger.info("🚧 用户中断交易")
-                # 询问是否调整参数
-                from rich.prompt import Confirm, FloatPrompt
-
-                new_min_profit_rate = FloatPrompt.ask(
-                    "输入新的最小价差收益率",
-                    default=self.risk_config.min_profit_rate
-                )
-                self.risk_config.min_profit_rate = new_min_profit_rate
-                logger.info(f"✅ 已更新最小价差收益率: {self.risk_config.min_profit_rate:.4%}")
-
-                if not Confirm.ask("是否继续执行交易?", default=True):
-                    self._running = False
-                    logger.info("🛑 用户选择停止交易")
-                    break
-                else:
-                    # 继续交易，重置超时计时器
-                    self._last_trade_time = time.time()
 
             except Exception as e:
                 error_msg = (f"❌❌❌ {self.symbol} {self.exchange_pair} 交易进程结束, 错误内容: {e}\n"

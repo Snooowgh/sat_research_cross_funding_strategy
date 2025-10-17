@@ -693,4 +693,5 @@ class OkxFuture:
 
 
 if __name__ == '__main__':
-    pass
+    a = OkxFuture()
+    print(a.convert_order_qty_to_size("SOON", 44))

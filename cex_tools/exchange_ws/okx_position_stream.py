@@ -222,9 +222,9 @@ class OkxPositionWebSocket(PositionWebSocketStream):
         order_filled_accumulated_quantity_contracts = float(order_data.get('accFillSz', 0))
 
         # 转换为币种数量
-        original_quantity = self._convert_contracts_to_currency_amount(symbol, original_quantity_contracts)
-        order_last_filled_quantity = self._convert_contracts_to_currency_amount(symbol, order_last_filled_quantity_contracts)
-        order_filled_accumulated_quantity = self._convert_contracts_to_currency_amount(symbol, order_filled_accumulated_quantity_contracts)
+        original_quantity = self.okx_client.convert_order_qty_to_size(symbol, original_quantity_contracts)
+        order_last_filled_quantity = self.okx_client.convert_order_qty_to_size(symbol, order_last_filled_quantity_contracts)
+        order_filled_accumulated_quantity = self.okx_client.convert_order_qty_to_size(symbol, order_filled_accumulated_quantity_contracts)
 
         event = OrderUpdateEvent(
             exchange_code=self.exchange_code,
@@ -426,77 +426,3 @@ class OkxPositionWebSocket(PositionWebSocketStream):
             except asyncio.CancelledError:
                 pass
         logger.debug(f"[{self.exchange_code}] WebSocket 已停止")
-
-    def _convert_symbol_to_okx_format(self, symbol: str) -> str:
-        """
-        将标准交易对符号转换为OKX格式
-
-        Args:
-            symbol: 标准符号 (如 "BTCUSDT")
-
-        Returns:
-            str: OKX格式符号 (如 "BTC-USDT-SWAP")
-        """
-        if symbol.endswith("-USDT-SWAP"):
-            return symbol
-        elif symbol.endswith("USDT"):
-            return symbol.replace("USDT", "-USDT-SWAP")
-        else:
-            return symbol + "-USDT-SWAP"
-
-    def _get_contract_value(self, symbol: str) -> float:
-        """
-        获取合约面值 (ctVal)，用于将合约张数转换为币种数量
-
-        Args:
-            symbol: 交易对符号
-
-        Returns:
-            float: 合约面值
-        """
-        # 首先检查缓存
-        if symbol in self._contract_value_cache:
-            return self._contract_value_cache[symbol]
-
-        # 如果缓存中没有，尝试从API获取
-        try:
-            if self.okx_client:
-                okx_symbol = self._convert_symbol_to_okx_format(symbol)
-                result = self.okx_client.market.get_exchangeInfo(instId=okx_symbol)
-                if result and result.get("data"):
-                    ct_val = float(result["data"]["ctVal"])
-                    # 缓存结果
-                    self._contract_value_cache[symbol] = ct_val
-                    logger.debug(f"[{self.exchange_code}] 获取 {symbol} 合约面值: {ct_val}")
-                    return ct_val
-                else:
-                    logger.warning(f"[{self.exchange_code}] 无法获取 {symbol} 合约信息: {result}")
-            else:
-                logger.warning(f"[{self.exchange_code}] OKX客户端未初始化，无法获取合约面值")
-        except Exception as e:
-            logger.error(f"[{self.exchange_code}] 获取 {symbol} 合约面值失败: {e}")
-
-        # 默认返回1，避免转换失败
-        default_ct_val = 1.0
-        self._contract_value_cache[symbol] = default_ct_val
-        logger.warning(f"[{self.exchange_code}] 使用默认合约面值 {default_ct_val} for {symbol}")
-        return default_ct_val
-
-    def _convert_contracts_to_currency_amount(self, symbol: str, contract_amount: float) -> float:
-        """
-        将合约张数转换为币种数量
-
-        Args:
-            symbol: 交易对符号
-            contract_amount: 合约张数
-
-        Returns:
-            float: 币种数量
-        """
-        if contract_amount == 0:
-            return 0
-
-        ct_val = self._get_contract_value(symbol)
-        currency_amount = contract_amount * ct_val
-        # logger.debug(f"[{self.exchange_code}] 转换合约张数: {symbol} {contract_amount}张 -> {currency_amount}币 (ctVal={ct_val})")
-        return currency_amount
