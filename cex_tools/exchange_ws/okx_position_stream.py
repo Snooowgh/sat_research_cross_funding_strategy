@@ -62,12 +62,13 @@ class OkxPositionWebSocket(PositionWebSocketStream):
         self._listen_task: Optional[asyncio.Task] = None
         self._login_sent = False
 
-        # 合约信息缓存 (合约面值)
-        self._contract_value_cache: dict = {}  # {symbol: ctVal}
-
         # 初始化OKX客户端用于获取合约信息
         try:
-            self.okx_client = OkxFuture()
+            self.okx_client = OkxFuture(
+                self.api_key,
+                self.secret,
+                self.passphrase
+            )
         except Exception as e:
             self.okx_client = None
             logger.error(f"[{self.exchange_code}] 初始化OKX客户端失败: {e}")
