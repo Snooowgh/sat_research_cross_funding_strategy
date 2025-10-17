@@ -179,6 +179,56 @@ class LighterPositionDetail(BinancePositionDetail):
 
 
 
+class BinanceUnifiedPositionDetail(BinancePositionDetail):
+    """
+    基于Binance Portfolio Margin SDK数据的仓位对象
+    具有与BinancePositionDetail完全相同的属性，但直接从Portfolio Margin SDK数据对象中获取值
+    """
+
+    def __init__(self, portfolio_margin_position_data, exchange_code=None):
+        """
+        从Portfolio Margin SDK的仓位数据对象初始化
+
+        Args:
+            portfolio_margin_position_data: Portfolio Margin SDK返回的仓位数据对象
+            exchange_code: 交易所代码
+        """
+        self.exchange_code = exchange_code
+
+        # Portfolio Margin SDK字段映射到BinancePositionDetail标准字段
+        # 根据注释中的数据格式: QueryUmPositionInformationResponse(entry_price='0.30923', leverage='5', mark_price='0.3092429', max_notional_value='6000000.0', position_amt='19.0', notional='5.8756151', symbol='TRXUSDT', un_realized_profit='0.0002451', liquidation_price='0', position_side='BOTH', update_time=1760718563795, additional_properties={})
+
+        self.adl = 0  # Portfolio Margin SDK可能没有这个字段，设为默认值
+        self.entryPrice = float(portfolio_margin_position_data.entry_price) if portfolio_margin_position_data.entry_price else 0
+        self.breakEvenPrice = 0  # 默认值
+        self.marginType = "cross"  # Portfolio Margin默认使用全仓
+        self.isAutoAddMargin = "false"  # 默认值
+        self.isolatedMargin = 0  # 默认值
+        self.leverage = float(portfolio_margin_position_data.leverage) if portfolio_margin_position_data.leverage else 1
+        self.liquidationPrice = float(portfolio_margin_position_data.liquidation_price) if portfolio_margin_position_data.liquidation_price else 0
+        self.fundingFee = 0  # 默认值
+        self.markPrice = float(portfolio_margin_position_data.mark_price) if portfolio_margin_position_data.mark_price else 0
+        self.maxNotionalValue = float(portfolio_margin_position_data.max_notional_value) if portfolio_margin_position_data.max_notional_value else 0
+        self.positionAmt = float(portfolio_margin_position_data.position_amt) if portfolio_margin_position_data.position_amt else 0
+        self.notional = float(portfolio_margin_position_data.notional) if portfolio_margin_position_data.notional else 0
+        self.isolatedWallet = 0  # 默认值
+        self.pair = portfolio_margin_position_data.symbol
+        self.symbol = self.pair.replace("USDT", "")
+        self.unRealizedProfit = float(portfolio_margin_position_data.un_realized_profit) if portfolio_margin_position_data.un_realized_profit else 0
+        self.positionSide = portfolio_margin_position_data.position_side
+        self.updateTime = float(portfolio_margin_position_data.update_time) if portfolio_margin_position_data.update_time else 0
+
+        # 确定仓位方向
+        if self.positionAmt > 0:
+            self.position_side = TradeDirection.long
+        elif self.positionAmt < 0:
+            self.position_side = TradeDirection.short
+        else:
+            self.position_side = None
+
+        self.funding_rate = None
+
+
 class BybitPositionDetail(BinancePositionDetail):
     """Bybit持仓详情"""
 

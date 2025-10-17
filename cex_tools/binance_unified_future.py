@@ -13,7 +13,7 @@ from loguru import logger
 from typing import Dict, List, Optional, Any, Union
 
 from cex_tools.binance_future import BinanceFuture
-from cex_tools.exchange_model.position_model import BinancePositionDetail
+from cex_tools.exchange_model.position_model import BinancePositionDetail, BinanceUnifiedPositionDetail
 from cex_tools.exchange_model.order_model import BinanceOrder, BinanceOrderStatus, BinanceUnifiedOrder
 from cex_tools.exchange_model.kline_bar_model import BinanceKlineBar
 from cex_tools.exchange_model.orderbook_model import BinanceOrderBook
@@ -108,28 +108,36 @@ class BinanceUnifiedFuture:
         """转换价格精度 - 使用基础Binance接口"""
         return self.base_binance_future.convert_price(symbol, price)
 
-    def get_all_cur_positions(self) -> List[BinancePositionDetail]:
-        """获取所有当前仓位"""
+    def get_all_cur_positions(self):
+        """获取所有当前仓位 - 使用Portfolio Margin SDK"""
         try:
             # 根据账户类型选择合适的端点
             positions = self.rest_client.query_um_position_information().data()
-            # 过滤有仓位的数据
-            active_positions = list(filter(lambda pos: float(pos.get("positionAmt", 0)) != 0, positions))
-            return [BinancePositionDetail(pos, self.exchange_code) for pos in active_positions]
+            # Portfolio Margin SDK返回的数据格式示例:
+            # [QueryUmPositionInformationResponse(entry_price='0.30923', leverage='5', mark_price='0.3092429',
+            #  max_notional_value='6000000.0', position_amt='19.0', notional='5.8756151',
+            #  symbol='TRXUSDT', un_realized_profit='0.0002451', liquidation_price='0',
+            #  position_side='BOTH', update_time=1760718563795, additional_properties={})]
+
+            if positions:
+                # 过滤有仓位的数据
+                active_positions = list(filter(lambda pos: float(pos.position_amt or 0) != 0, positions))
+                return [BinanceUnifiedPositionDetail(pos, self.exchange_code) for pos in active_positions]
+            return []
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取仓位失败: {e}")
             return []
 
-    def get_position(self, symbol: str) -> Optional[BinancePositionDetail]:
-        """获取指定交易对仓位"""
+    def get_position(self, symbol: str) -> Optional[BinanceUnifiedPositionDetail]:
+        """获取指定交易对仓位 - 使用Portfolio Margin SDK"""
         symbol = self.convert_symbol(symbol)
         try:
             positions = self.rest_client.query_um_position_information(symbol).data()
             if positions:
                 # 过滤有仓位的数据
-                active_positions = list(filter(lambda pos: float(pos.get("positionAmt", 0)) != 0, positions))
+                active_positions = list(filter(lambda pos: float(pos.position_amt or 0) != 0, positions))
                 if active_positions:
-                    return BinancePositionDetail(active_positions[0], self.exchange_code)
+                    return BinanceUnifiedPositionDetail(active_positions[0], self.exchange_code)
             return None
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取{symbol}仓位失败: {e}")
@@ -298,9 +306,9 @@ class BinanceUnifiedFuture:
         """获取维持保证金比例 - 使用Portfolio Margin"""
         try:
             # 使用Portfolio Margin SDK获取账户信息
-            account_info = self.rest_client.account_balance().data()
-            total_maint_margin = float(account_info.get("total_maint_margin", 0))
-            total_wallet_balance = float(account_info.get("total_wallet_balance", 0))
+            account_info = self.rest_client.account_information().data()
+            total_maint_margin = float(account_info.account_maint_margin)
+            total_wallet_balance = float(account_info.account_equity)
 
             if total_wallet_balance == 0:
                 return 0
@@ -359,12 +367,13 @@ class BinanceUnifiedFuture:
 
     def get_position_max_open_usd_amount(self, pair: str = None) -> float:
         """获取最大开仓金额 - 使用基础Binance接口"""
-        return self.base_binance_future.get_position_max_open_usd_amount(pair)
+        pass
 
 
 if __name__ == '__main__':
     a = BinanceUnifiedFuture(key="JysfgWvPEc04s7SwdNmLscEOAMecCTPNMjr6NCBN3kQPz9lvpRNP44BoG4Z5aOrB",
                             secret="ZGFMevlQlx66pZ6OY4lUmip2G5Lz4zHztSGrhTsq4gOvQIb0UTnhMAn8JrRcIl6H")
+    # print(a.rest_client.account_information().data())
     # print(a.get_all_cur_positions())
     # 交易相关测试
     # symbol = "BTC"
@@ -374,6 +383,6 @@ if __name__ == '__main__':
     # print(a.get_recent_order(symbol, o["orderId"]))
     # print(a.cancel_all_orders(symbol))
 
-    print(a.rest_client.account_balance().data())
-    print(a.get_available_margin())
-    print(a.get_total_margin())
+    # print(a.rest_client.account_balance().data())
+    # print(a.get_available_margin())
+    # print(a.get_total_margin())
