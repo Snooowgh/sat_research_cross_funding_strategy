@@ -327,13 +327,13 @@ class RealtimeHedgeEngine:
         取消所有活跃的挂单
         """
         logger.info(f"🚫 {self.symbol} {self.exchange_pair} 取消所有挂单")
-
-        cancel_task1 = asyncio.create_task(self._cancel_order(self.exchange1, self.trade_config.pair1))
-        cancel_task2 = asyncio.create_task(self._cancel_order(self.exchange2, self.trade_config.pair2))
-        cancel_tasks = [cancel_task1, cancel_task2]
-
-        # 等待所有取消操作完成
-        await asyncio.gather(*cancel_tasks, return_exceptions=True)
+        await self._cancel_order(self.exchange2, self.trade_config.pair2)
+        # cancel_task1 = asyncio.create_task(self._cancel_order(self.exchange1, self.trade_config.pair1))
+        # cancel_task2 = asyncio.create_task(self._cancel_order(self.exchange2, self.trade_config.pair2))
+        # cancel_tasks = [cancel_task1, cancel_task2]
+        #
+        # # 等待所有取消操作完成
+        # await asyncio.gather(*cancel_tasks, return_exceptions=True)
 
     async def _cancel_order(self, exchange, pair: str):
         """
@@ -1244,7 +1244,7 @@ class RealtimeHedgeEngine:
         imbalance_value = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
         if abs(imbalance_value) < 50:
             return
-        imbalance_amt = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
+        imbalance_amt = risk_data.get_pos_imbalanced_amt(self.symbol, self.exchange_code_list)
         if imbalance_amt > 0:
             # 做空
             side = TradeSide.SELL
