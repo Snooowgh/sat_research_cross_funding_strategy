@@ -22,6 +22,7 @@ class TradingMode(Enum):
 
 class ExchangeEnum:
     BINANCE = "binance"
+    BINANCE_UNIFIED = "binance_unified"
     OKX = "okx"
     OKX_SPOT = "okx_spot"
     BITGET = "bitget"

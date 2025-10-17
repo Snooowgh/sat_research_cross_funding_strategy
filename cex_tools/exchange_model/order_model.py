@@ -195,6 +195,59 @@ class LighterOrder(BaseOrderModel):
         self.updateTime = int(order_info['updated_at'] * 1000)  # 1705372661393
 
 
+class BinanceUnifiedOrder(BaseOrderModel):
+    """
+    基于Binance Portfolio Margin SDK数据的订单对象
+    具有与BinanceOrder完全相同的属性，但直接从Portfolio Margin SDK数据对象中获取值
+    """
+
+    def __init__(self, portfolio_margin_order_data):
+        """
+        从Portfolio Margin SDK的订单数据对象初始化
+
+        Args:
+            portfolio_margin_order_data: Portfolio Margin SDK返回的订单数据对象
+        """
+        # Portfolio Margin SDK字段映射到BinanceOrder标准字段
+        self.orderId = portfolio_margin_order_data.order_id  # 订单ID
+        self.symbol = portfolio_margin_order_data.symbol  # 交易对符号
+        self.pair = self.symbol
+        self.status = portfolio_margin_order_data.status  # 订单状态
+        self.clientOrderId = portfolio_margin_order_data.client_order_id  # 客户端订单ID
+
+        # 价格相关字段
+        self.price = float(portfolio_margin_order_data.price) if portfolio_margin_order_data.price else 0  # 价格
+        self.avgPrice = float(portfolio_margin_order_data.avg_price) if portfolio_margin_order_data.avg_price else 0  # 平均价格
+
+        # 数量相关字段
+        self.origQty = float(portfolio_margin_order_data.orig_qty) if portfolio_margin_order_data.orig_qty else 0  # 原始数量
+        self.executedQty = float(portfolio_margin_order_data.executed_qty) if portfolio_margin_order_data.executed_qty else 0  # 已执行数量
+        self.cumQuote = float(portfolio_margin_order_data.cum_quote) if portfolio_margin_order_data.cum_quote else 0  # 累计成交金额
+
+        # 订单属性
+        self.timeInForce = portfolio_margin_order_data.time_in_force  # 时效性
+        self.type = portfolio_margin_order_data.type  # 订单类型
+        self.origType = portfolio_margin_order_data.orig_type  # 原始订单类型
+        self.reduceOnly = portfolio_margin_order_data.reduce_only  # 只减仓
+        self.side = portfolio_margin_order_data.side  # 买卖方向
+        self.positionSide = portfolio_margin_order_data.position_side  # 持仓方向
+
+        # 高级订单属性
+        self.stopPrice = 0  # Portfolio Margin SDK可能没有这个字段，设为默认值
+        self.workingType = ""  # 默认值
+        self.closePosition = False  # 默认值
+
+        # 风控相关属性
+        self.priceMatch = portfolio_margin_order_data.price_match  # 价格匹配模式
+        self.selfTradePreventionMode = portfolio_margin_order_data.self_trade_prevention_mode  # 自成交预防模式
+        self.goodTillDate = portfolio_margin_order_data.good_till_date  # 有效期
+        self.priceProtect = False  # 默认值
+
+        # 时间戳
+        self.time = int(portfolio_margin_order_data.time)  # 创建时间
+        self.updateTime = int(portfolio_margin_order_data.update_time)  # 更新时间
+
+
 class BybitOrder(BaseOrderModel):
 
     def __init__(self, order_info):
