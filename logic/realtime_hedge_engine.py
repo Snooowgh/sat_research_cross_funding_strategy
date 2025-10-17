@@ -877,20 +877,23 @@ class RealtimeHedgeEngine:
             # 等待订单成交
             await asyncio.sleep(0.1)
 
-            # 获取成交均价
-            order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
-            order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
+            try:
+                # 获取成交均价
+                order1_avg_price = await self._get_order_avg_price(self.exchange1, order1, self.trade_config.pair1)
+                order2_avg_price = await self._get_order_avg_price(self.exchange2, order2, self.trade_config.pair2)
 
-            # 计算实际价差收益
-            actual_spread = order1_avg_price - order2_avg_price
-            if reduce_side1 == TradeSide.BUY:
-                spread_profit = -actual_spread * amount
-            else:
-                spread_profit = actual_spread * amount
-            logger.warning(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} 触发强制减仓: ${amount * mid_price:.2f}, "
-                           f"价差收益:${spread_profit:.2f}")
-            force_reduce_value += amount * mid_price
-            total_spread_profit += spread_profit
+                # 计算实际价差收益
+                actual_spread = order1_avg_price - order2_avg_price
+                if reduce_side1 == TradeSide.BUY:
+                    spread_profit = -actual_spread * amount
+                else:
+                    spread_profit = actual_spread * amount
+                logger.warning(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} 触发强制减仓: ${amount * mid_price:.2f}, "
+                               f"价差收益:${spread_profit:.2f}")
+                force_reduce_value += amount * mid_price
+                total_spread_profit += spread_profit
+            except Exception as e:
+                logger.warning(f"强制减仓 {self.symbol} {self.exchange_pair} 获取订单均价失败: {e}")
             await self._update_exchange_info()
         if force_reduce_value > 0:
             await async_notify_telegram(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} "
@@ -1028,7 +1031,7 @@ class RealtimeHedgeEngine:
 
         logger.info(
             f"🏁 交易进程结束: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
-        await self._auto_balance_position()
+        await self._update_exchange_info()
 
     async def _has_active_orders(self, exchange, pair: str) -> bool:
         """
