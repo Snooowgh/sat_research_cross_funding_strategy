@@ -60,7 +60,7 @@ class ManagerConfig:
 
     # 通知配置
     enable_notifications: bool = True
-    notify_interval_min: int = 60  # 通知间隔(分钟)
+    notify_interval_min: int = 15  # 通知间隔(分钟)
 
     # 启动配置
     engine_startup_delay_sec: float = 5.0  # 引擎启动间隔(秒)，避免API请求过多
@@ -1049,7 +1049,7 @@ class MultiProcessArbitrageManager:
 
             # 发送通知
             await async_notify_telegram(message, channel_type=CHANNEL_TYPE.QUIET)
-            await async_notify_telegram(str(self.cached_risk_data), channel_type=CHANNEL_TYPE.QUIET)
+            await async_notify_telegram(str(self.shared_risk_data["risk_data"]), channel_type=CHANNEL_TYPE.QUIET)
             self.last_notify_time = current_time
 
         except Exception as e:

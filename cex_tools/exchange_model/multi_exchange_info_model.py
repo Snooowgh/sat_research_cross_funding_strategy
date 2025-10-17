@@ -51,7 +51,7 @@ class SingleExchangeInfoModel:
         return self.leverage < self.default_safe_leverage and \
             self.maintenance_margin_ratio < self.default_safe_maintenance_margin_ratio and \
             self.cross_margin_usage < self.default_safe_cross_margin_usage and \
-            self.total_margin > 10 and self.available_margin > 10 and self.max_open_notional_value() > 50
+            self.total_margin > 100 and self.available_margin > 200 and self.max_open_notional_value() > 200
 
     def get_pair_pos_by_symbol(self, symbol):
         for pos1 in self.positions:

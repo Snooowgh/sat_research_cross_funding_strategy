@@ -547,16 +547,10 @@ class RealtimeHedgeEngine:
         # 如果计算出的订单金额小于20美金，但剩余仓位大于20美金，则调整到最小金额
         while base_amount * avg_price < self.trade_config.min_order_value_usd:
             base_amount *= 2
-            logger.debug(
-                f"订单金额低, 翻倍处理: {base_amount:.4f} (${base_amount * avg_price:.2f})"
-            )
         # 如果翻倍后超过最大订单金额，则限制在最大订单金额
         while base_amount * avg_price > self.trade_config.max_order_value_usd\
                 or base_amount * avg_price > self._get_max_open_notional_value():
             base_amount = align_with_decimal(base_amount / 2, base_amount)
-            logger.debug(
-                f"订单金额高, 减半处理: {base_amount:.4f} (${base_amount * avg_price:.2f})"
-            )
 
         if self.trade_config.daemon_mode:
             final_amount = base_amount
@@ -646,7 +640,13 @@ class RealtimeHedgeEngine:
         try:
             # 根据交易模式执行不同逻辑
             if self.trade_config.trade_mode == TradeMode.LIMIT_TAKER:
-                await self._execute_limit_taker_trade(signal, amount)
+                try:
+                    await self._execute_limit_taker_trade(signal, amount)
+                except Exception as e:
+                    if "available margin (in USD) is too low" in str(e):
+                        logger.warning(f"⚠️ 可用保证金不足.. 不能下单加仓")
+                    else:
+                        raise e
             else:
                 await self._execute_taker_taker_trade(signal, amount)
 
@@ -914,7 +914,7 @@ class RealtimeHedgeEngine:
 
         # 初始化定时任务相关变量
         last_risk_check_time = time.time()
-        RISK_CHECK_INTERVAL = 60  # 60秒执行一次风控检查
+        RISK_CHECK_INTERVAL = 30  # 30秒执行一次风控检查
 
         while self._running and (self._remaining_amount > 0 or self.trade_config.daemon_mode):
             try:
