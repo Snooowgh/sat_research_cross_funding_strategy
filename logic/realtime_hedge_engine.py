@@ -17,7 +17,6 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
-from rich.prompt import FloatPrompt, Confirm
 
 from cex_tools.exchange_ws.orderbook_stream import OrderBookStream, OrderBookData
 from cex_tools.cex_enum import TradeSide
@@ -40,16 +39,10 @@ class RiskConfig:
     """风控配置"""
     max_orderbook_age_sec: float = 1.0  # 订单簿最大过期时间（秒）
     max_spread_pct: float = 0.0015  # 最大买卖价差（0.15%）
-    min_liquidity_usd: float = 500  # 最小流动性（美元）
-    min_profit_rate: float = 0.0002  # 开仓时最小价差收益率（0.02%）
+    min_liquidity_usd: float = 200  # 最小流动性（美元）
+    min_profit_rate: float = 0.0001  # 开仓时最小价差收益率（0.01%）
     reduce_pos_min_profit_rate: float = -0.0013  # 平仓时最小价差收益率（0.13%）
     liquidity_depth_levels: int = 10  # 流动性检查深度层级
-    user_min_profit_rate: float = 0.001  # 用户设置的最小收益率底线（不可低于此值）
-    enable_dynamic_profit_rate: bool = True  # 是否启用动态调整收益率
-    profit_rate_adjust_step: float = 0.00005  # 收益率调整步长（0.005%）
-    profit_rate_adjust_threshold: int = 3  # 连续多少笔交易触发调整
-    no_trade_reduce_timeout_sec: float = 0  # 无成交多久后降低收益率（秒，0表示禁用）
-    no_trade_reduce_step_multiplier: float = 1.5  # 无成交降低收益率时的步长倍数（相对于正常步长）
     auto_pos_balance_usd_value_limit: float = 1000.0 # 自动平衡仓位金额的最大USD值
 
 
@@ -58,8 +51,8 @@ class TradeConfig:
     """交易配置"""
     pair1: str  # 交易对1（如 "BTCUSDT"）
     pair2: str  # 交易对2（如 "BTCUSDT"）
-    side1: str  # 交易方向1（"BUY" 或 "SELL"）
-    side2: str  # 交易方向2（"BUY" 或 "SELL"）
+    side1: str  # 交易方向1（ "BUY" 或 "SELL"）
+    side2: str  # 交易方向2（ "BUY" 或 "SELL"）
     amount_min: float = 0  # 单笔交易最小数量
     amount_max: float = 0  # 单笔交易最大数量
     amount_step: float = 1.0  # 数量步长
@@ -178,14 +171,6 @@ class RealtimeHedgeEngine:
         # 无交易超时跟踪
         self._last_trade_time = time.time()  # 上次交易时间
         self._timeout_enabled = trade_config.no_trade_timeout_sec > 0
-
-        # 动态收益率调整机制
-        self._recent_profit_rates = []  # 最近N笔交易的收益率
-        self._last_adjustment_trade_count = 0  # 上次调整时的交易笔数
-        # 记录用户期望的安全初始值（无成交降低时可以降到此值，而不是破坏用户设置）
-        self._initial_min_profit_rate = risk_config.user_min_profit_rate
-        # 无交易最多下调多少次最小收益率
-        self._reduce_min_profit_rate_cnt = 0
 
         # LIMIT-TAKER模式下的挂单状态管理
         self._last_signal: Optional[TradeSignal] = None  # 最后一次有效的交易信号
@@ -327,27 +312,13 @@ class RealtimeHedgeEngine:
         取消所有活跃的挂单
         """
         logger.info(f"🚫 {self.symbol} {self.exchange_pair} 取消所有挂单")
-        await self._cancel_order(self.exchange2, self.trade_config.pair2)
+        await self.exchange2.cancel_all_orders(self.trade_config.pair2)
         # cancel_task1 = asyncio.create_task(self._cancel_order(self.exchange1, self.trade_config.pair1))
         # cancel_task2 = asyncio.create_task(self._cancel_order(self.exchange2, self.trade_config.pair2))
         # cancel_tasks = [cancel_task1, cancel_task2]
         #
         # # 等待所有取消操作完成
         # await asyncio.gather(*cancel_tasks, return_exceptions=True)
-
-    async def _cancel_order(self, exchange, pair: str):
-        """
-        取消单个订单
-
-        :param exchange: 交易所对象
-        :param pair: 交易对
-        """
-        try:
-            result = await exchange.cancel_all_orders(pair)
-            return result
-        except Exception as e:
-            logger.warning(f"取消所有订单失败 {exchange.exchange_code} {pair} {e}")
-            raise e
         
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
         """
@@ -643,7 +614,6 @@ class RealtimeHedgeEngine:
             try:
                 spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
                 ma_spread = spread_stats.mean_spread if spread_stats else 0.0
-                std_spread = spread_stats.std_spread if spread_stats else 0.0
 
                 # 检查当前价差是否偏离历史均值过大（可能市场异常）
                 if ma_spread != 0:
@@ -751,9 +721,6 @@ class RealtimeHedgeEngine:
             self.trade_config._timeout_enabled = False
             logger.info(f"🔄 {self.trade_config.pair1} 建立了仓位，转为持续交易模式")
 
-        # 动态调整最小收益率
-        await self._adjust_min_profit_rate(executed_spread_profit_rate)
-
         # 判断是否需要暂停交易
         is_add_position = signal.is_add_position()
         use_min_profit_rate = self.risk_config.min_profit_rate if is_add_position else self.risk_config.reduce_pos_min_profit_rate
@@ -763,17 +730,7 @@ class RealtimeHedgeEngine:
             logger.info(
                 f"⚠️ 价差收益率 {executed_spread_profit_rate:.2%} < {use_min_profit_rate:.2%}"
                 f"暂停交易{int(delay_time * 60)}s")
-            try:
-                await asyncio.sleep(int(60 * delay_time))
-            except KeyboardInterrupt:
-                logger.info("🚧 人工终止暂停")
-                new_min_profit_rate = FloatPrompt.ask("修改最小价差收益率?",
-                                                      default=self.risk_config.min_profit_rate)
-                if new_min_profit_rate != self.risk_config.min_profit_rate:
-                    min_profit_rate = new_min_profit_rate
-                    print(f"🚀 修改最小价差收益率: {min_profit_rate:.2%}")
-                if not Confirm.ask("是否继续执行交易?", default=True):
-                    raise Exception("用户终止交易")
+            await asyncio.sleep(int(60 * delay_time))
 
     async def _execute_limit_taker_trade(self, signal: TradeSignal, amount: float):
         """
@@ -812,74 +769,6 @@ class RealtimeHedgeEngine:
     async def _place_limit_order_exchange2(self, pair: str, side: str, amount: float, price: float, reduceOnly):
         """在交易所2下限价单（异步接口）"""
         return await self.exchange2.make_new_order(pair, side, "LIMIT", amount, price=price, reduceOnly=reduceOnly)
-
-    async def _adjust_min_profit_rate(self, executed_profit_rate: float):
-        """
-        根据实际执行收益率动态调整最小收益率要求
-
-        调整逻辑：
-        1. 记录最近N笔交易的实际收益率
-        2. 如果连续N笔交易收益率都明显高于当前最小要求，适当提高要求
-        3. 如果连续N笔交易收益率都接近最小要求，适当降低要求（但不低于用户设置底线）
-        4. 调整幅度为 profit_rate_adjust_step
-
-        :param executed_profit_rate: 本次交易的实际执行收益率
-        """
-        if not self.risk_config.enable_dynamic_profit_rate:
-            return
-
-        # 记录最近的收益率
-        self._recent_profit_rates.append(executed_profit_rate)
-
-        # 只保留最近N笔
-        max_records = self.risk_config.profit_rate_adjust_threshold
-        if len(self._recent_profit_rates) > max_records:
-            self._recent_profit_rates = self._recent_profit_rates[-max_records:]
-
-        # 至少需要N笔交易数据才能调整
-        if len(self._recent_profit_rates) < self.risk_config.profit_rate_adjust_threshold:
-            return
-
-        # 检查是否需要调整（距离上次调整至少N笔交易）
-        trades_since_last_adjustment = self._trade_count - self._last_adjustment_trade_count
-        if trades_since_last_adjustment < self.risk_config.profit_rate_adjust_threshold:
-            return
-
-        # 计算平均收益率
-        avg_profit_rate = sum(self._recent_profit_rates) / len(self._recent_profit_rates)
-        current_min_rate = self.risk_config.min_profit_rate
-
-        # 判断是否需要调整
-        # 情况1: 实际收益率持续超出当前要求较多，提高要求以获得更好的entry
-        if avg_profit_rate > current_min_rate * 1.5:
-            new_min_rate = current_min_rate + self.risk_config.profit_rate_adjust_step
-            self.risk_config.min_profit_rate = new_min_rate
-            self._last_adjustment_trade_count = self._trade_count
-            logger.info(
-                f"📈 动态调整: 实际收益率 {avg_profit_rate:.4%} 持续超出要求，"
-                f"提高最小收益率 {current_min_rate:.4%} -> {new_min_rate:.4%}"
-            )
-            # 清空记录，重新统计
-            self._recent_profit_rates.clear()
-
-        # 情况2: 实际收益率接近当前要求，适当降低要求（但不低于用户底线）
-        elif (current_min_rate * 1.05 < avg_profit_rate < current_min_rate * 1.1
-              and current_min_rate > self.risk_config.user_min_profit_rate
-              and current_min_rate > self._initial_min_profit_rate):
-            new_min_rate = max(
-                current_min_rate - self.risk_config.profit_rate_adjust_step,
-                self.risk_config.user_min_profit_rate
-            )
-            if new_min_rate < current_min_rate:
-                self.risk_config.min_profit_rate = new_min_rate
-                self._last_adjustment_trade_count = self._trade_count
-                logger.info(
-                    f"📉 动态调整: 实际收益率 {avg_profit_rate:.4%} 接近最小要求，"
-                    f"降低最小收益率 {current_min_rate:.4%} -> {new_min_rate:.4%} "
-                    f"(底线: {self.risk_config.user_min_profit_rate:.4%})"
-                )
-                # 清空记录，重新统计
-                self._recent_profit_rates.clear()
 
     async def _get_order_avg_price(self, exchange, order: dict, pair: str) -> float:
         """获取订单成交均价"""
@@ -920,12 +809,6 @@ class RealtimeHedgeEngine:
         logger.info(f"   风控配置: 订单簿过期={self.risk_config.max_orderbook_age_sec}s "
                     f"价差<{self.risk_config.max_spread_pct:.2%} "
                     f"最小收益率>{self.risk_config.min_profit_rate:.4%}")
-
-        # 如果启用了无成交降低收益率机制
-        if (self.risk_config.enable_dynamic_profit_rate and
-                self.risk_config.no_trade_reduce_timeout_sec > 0):
-            logger.info(f"   无成交降低机制: {self.risk_config.no_trade_reduce_timeout_sec}秒无成交后降低收益率 "
-                        f"(底线: {self.risk_config.user_min_profit_rate:.4%})")
 
         # 订阅订单簿
         self.stream1.subscribe(self.trade_config.pair1, self._on_orderbook1_update)
@@ -1046,45 +929,6 @@ class RealtimeHedgeEngine:
                         self._running = False
                         break
 
-                # 检查无成交降低收益率机制（在超时前主动降低收益率以提高成交概率）
-                # 关键逻辑：只有当前收益率被上调过（高于初始值）时，才允许降低
-                # 这样可以避免破坏用户精心设置的初始收益率
-                if (self.risk_config.enable_dynamic_profit_rate and
-                        self.risk_config.no_trade_reduce_timeout_sec > 0):
-                    elapsed_since_last_trade = time.time() - self._last_trade_time
-
-                    # 核心条件：
-                    # 1. 超过设定时间无成交
-                    # 2. 当前收益率高于初始值（说明被上调过）
-                    # 3. 当前收益率高于底线（防止降到底线以下）
-                    if (elapsed_since_last_trade > self.risk_config.no_trade_reduce_timeout_sec and
-                            self.risk_config.min_profit_rate > self._initial_min_profit_rate and
-                            self.risk_config.min_profit_rate > self.risk_config.user_min_profit_rate and
-                            self._reduce_min_profit_rate_cnt < 5):
-
-                        # 降低收益率（使用更大的步长以加快调整）
-                        reduce_step = (self.risk_config.profit_rate_adjust_step *
-                                       self.risk_config.no_trade_reduce_step_multiplier)
-
-                        # 降低目标：不低于初始值，也不低于底线
-                        new_min_rate = max(
-                            self.risk_config.min_profit_rate - reduce_step,
-                            self._initial_min_profit_rate,
-                            self.risk_config.user_min_profit_rate
-                        )
-
-                        if new_min_rate < self.risk_config.min_profit_rate:
-                            old_rate = self.risk_config.min_profit_rate
-                            self.risk_config.min_profit_rate = new_min_rate
-                            logger.warning(
-                                f"⚠️  无成交超时调整: {elapsed_since_last_trade:.0f}秒无成交，"
-                                f"降低最小收益率 {old_rate:.4%} -> {new_min_rate:.4%} "
-                                f"(初始值: {self._initial_min_profit_rate:.4%}, "
-                                f"底线: {self.risk_config.user_min_profit_rate:.4%})"
-                            )
-                            # 重置上次交易时间，避免连续降低
-                            self._last_trade_time = time.time()
-                            self._reduce_min_profit_rate_cnt += 1
                 # 计算交易信号
                 signal_generate_start_time = time.time()
                 if self.trade_config.daemon_mode:
@@ -1152,6 +996,13 @@ class RealtimeHedgeEngine:
 
                 # 找到满足条件的机会！动态计算交易数量
                 trade_amount = await self._calculate_trade_amount(signal)
+
+                if trade_amount * signal.price1 < self.trade_config.min_order_value_usd:
+                    logger.warning(
+                        f"⚠️ {self.symbol} {self.exchange_pair} 订单值 {trade_amount * signal.price1} "
+                        f"低于最小值 {self.trade_config.min_order_value_usd:.2f}，跳过本次交易")
+                    await asyncio.sleep(0.05)
+                    continue
 
                 if time.time() - signal.signal_generate_start_time > 0.010:
                     # > 10ms 记录警告日志
