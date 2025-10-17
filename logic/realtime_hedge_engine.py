@@ -914,14 +914,13 @@ class RealtimeHedgeEngine:
 
         # 初始化定时任务相关变量
         last_risk_check_time = time.time()
-        RISK_CHECK_INTERVAL = 30  # 30秒执行一次风控检查
+        RISK_CHECK_INTERVAL = 60  # 60秒执行一次风控检查
 
         while self._running and (self._remaining_amount > 0 or self.trade_config.daemon_mode):
             try:
                 # 定时风控检查：每30秒执行一次
                 current_time = time.time()
                 if current_time - last_risk_check_time > RISK_CHECK_INTERVAL:
-                    logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
                     try:
                         # 1. 更新仓位信息
                         await self._update_exchange_info()
@@ -1129,6 +1128,7 @@ class RealtimeHedgeEngine:
 
     async def _update_exchange_info(self):
         if self.exchange_combined_info_cache['update_time'] - time.time() > 60:
+            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
             risk_data, update_time = await self.update_exchange_info_helper()
             # 分发给所有引擎进程
             self.exchange_combined_info_cache['risk_data'] = risk_data
