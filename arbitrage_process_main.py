@@ -55,15 +55,14 @@ class EngineHealthMetrics:
 class ManagerConfig:
     """管理器配置"""
     # 更新间隔
-    risk_update_interval_min: int = 30  # 风控数据更新间隔(分钟)
-    engine_check_interval_min: int = 15  # 引擎状态检查间隔(分钟)
+    risk_update_interval_min: int = 15  # 风控数据更新间隔(分钟)
 
     # 通知配置
     enable_notifications: bool = True
-    notify_interval_min: int = 15  # 通知间隔(分钟)
+    notify_interval_min: int = 5  # 通知间隔(分钟)
 
     # 启动配置
-    engine_startup_delay_sec: float = 5.0  # 引擎启动间隔(秒)，避免API请求过多
+    engine_startup_delay_sec: float = 10.0  # 引擎启动间隔(秒)，避免API请求过多
 
     # 健康管理配置
     memory_limit_mb: float = 1000.0  # 内存限制(MB)
