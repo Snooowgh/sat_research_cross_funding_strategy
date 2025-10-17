@@ -68,7 +68,7 @@ class TradeConfig:
     use_dynamic_amount: bool = True  # 是否根据订单簿动态调整下单数量
     max_first_level_ratio: float = 1  # 最大吃掉第一档流动性的比例（0.5 = 50%）
     no_trade_timeout_sec: float = 0  # 无交易自动关闭超时时间（秒，0表示禁用）
-    min_order_value_usd: float = 20.0  # 单笔最小订单金额（美元）
+    min_order_value_usd: float = 200.0  # 单笔最小订单金额（美元）
     max_order_value_usd: float = 500.0  # 单笔最大订单金额（美元）
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
@@ -321,34 +321,6 @@ class RealtimeHedgeEngine:
             if orderbook.asks and len(orderbook.asks) > level:
                 return float(orderbook.asks[level][0])
         return None
-
-    async def _place_limit_orders(self, signal: TradeSignal, amount: float):
-        """
-        在 LIMIT-TAKER 模式下同时下两个限价单
-
-        :param signal: 交易信号
-        :param amount: 交易数量
-        :return: (order1, order2) 两个订单的结果
-        """
-        # 获取限价单价格（使用一档价格）
-        price1 = self._get_limit_price(self._latest_orderbook1, signal.side1, 0)
-        price2 = self._get_limit_price(self._latest_orderbook2, signal.side2, 0)
-
-        if not price1 or not price2:
-            raise Exception(f"无法获取限价单价格: price1={price1}, price2={price2}")
-        await self._cancel_all_orders()
-        logger.info(f"🎯 {self.symbol} {self.exchange_pair} 下限价单: {amount:.4f} @ {price1}/{price2}")
-        # 并发下限价单
-        order1_task = asyncio.create_task(
-            self._place_limit_order_exchange1(self.trade_config.pair1, signal.side1, amount, price1, reduceOnly=(not signal.is_add_position()))
-        )
-        order2_task = asyncio.create_task(
-            self._place_limit_order_exchange2(self.trade_config.pair2, signal.side2, amount, price2, reduceOnly=(not signal.is_add_position()))
-        )
-
-        order1, order2 = await asyncio.gather(order1_task, order2_task)
-
-        return order1, order2
 
     async def _cancel_all_orders(self):
         """
@@ -811,13 +783,17 @@ class RealtimeHedgeEngine:
                     f"价差收益率={signal.spread_rate:.4%} {signal.z_score:.2f}({signal.zscore_threshold:.2f})({signal.delay_ms():.2f}ms)")
         logger.debug(signal)
 
-        # 下限价单
-        order1, order2 = await self._place_limit_orders(signal, amount)
+        # okx下限价单
+        price2 = self._get_limit_price(self._latest_orderbook2, signal.side2, 0)
+        if not price2:
+            raise Exception(f"{self.exchange2.exchange_code}无法获取限价单价格: price2={price2}")
+        order2 = await self._place_limit_order_exchange2(self.trade_config.pair2, signal.side2, amount, price2,
+                                          reduceOnly=(not signal.is_add_position()))
         # 更新最后信号时间
         self._last_signal = signal
 
         limit_msg = (f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER限价单已挂: "
-                    f"订单1: {order1.get('orderId', 'N/A')} 订单2: {order2.get('orderId', 'N/A')} "
+                    f"订单1: N/A 订单2: {order2.get('orderId', 'N/A')} "
                     f"数量: {amount:.4f} 信号: {signal.spread_rate:.4%}")
         logger.info(limit_msg)
 

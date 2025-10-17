@@ -11,7 +11,6 @@ from typing import Dict, Optional, Callable, Set
 from loguru import logger
 from dataclasses import dataclass
 
-from cex_tools.exchange_model.order_model import BaseOrderModel
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent, OrderStatusType, OrderType
 from cex_tools.async_exchange_adapter import AsyncExchangeAdapter
 from utils.notify_tools import async_notify_telegram
@@ -21,7 +20,7 @@ from utils.notify_tools import async_notify_telegram
 class HedgeConfig:
     """对冲配置"""
     # 最小对冲金额
-    min_hedge_value_usd: float = 100
+    min_hedge_value_usd: float = 50
 
 
 class PositionHedgeEngine:
@@ -59,6 +58,9 @@ class PositionHedgeEngine:
         # 对冲状态跟踪
         self.is_running = False
         self.processing_orders: Set[str] = set()  # 正在处理的订单ID，防止重复处理
+
+        # 累计订单数据结构
+        self.pending_hedges: Dict[str, Dict] = {}  # 待对冲的订单累计 {symbol_side: {amount, total_value, orders}}
 
         # 统计信息
         self.stats = {
@@ -116,6 +118,125 @@ class PositionHedgeEngine:
         """
         # 对冲方向与原始方向相反
         return "SELL" if original_side == "BUY" else "BUY"
+
+    def _get_pending_hedge_key(self, target_exchange: str, symbol: str, hedge_side: str) -> str:
+        """生成待对冲订单的唯一键"""
+        return f"{target_exchange}_{symbol}_{hedge_side}"
+
+    def _calculate_order_value_usd(self, quantity: float, price: float) -> float:
+        """计算订单美元价值"""
+        return quantity * price
+
+    async def _add_to_pending_hedges(self, target_exchange: AsyncExchangeAdapter, symbol: str,
+                                   hedge_side: str, quantity: float, price: float, event: OrderUpdateEvent):
+        """
+        添加订单到待对冲累计列表
+
+        Args:
+            target_exchange: 目标交易所
+            symbol: 交易对
+            hedge_side: 对冲方向
+            quantity: 数量
+            price: 价格
+            event: 原始订单事件
+        """
+        pending_key = self._get_pending_hedge_key(target_exchange.exchange_code, symbol, hedge_side)
+        order_value = self._calculate_order_value_usd(quantity, price)
+
+        if pending_key not in self.pending_hedges:
+            self.pending_hedges[pending_key] = {
+                'target_exchange': target_exchange,
+                'symbol': symbol,
+                'hedge_side': hedge_side,
+                'total_amount': 0.0,
+                'total_value': 0.0,
+                'avg_price': 0.0,
+                'orders': []
+            }
+
+        # 添加到累计
+        pending = self.pending_hedges[pending_key]
+        pending['total_amount'] += quantity
+        pending['total_value'] += order_value
+        pending['avg_price'] = pending['total_value'] / pending['total_amount']
+        pending['orders'].append({
+            'order_key': self._get_order_key(event),
+            'quantity': quantity,
+            'price': price,
+            'value': order_value,
+            'timestamp': time.time()
+        })
+
+        logger.info(f"📦 累计对冲订单: {symbol} {hedge_side}")
+        logger.info(f"   数量: +{quantity:.6f} (累计: {pending['total_amount']:.6f})")
+        logger.info(f"   价值: +{order_value:.2f} USD (累计: {pending['total_value']:.2f} USD)")
+
+        # 检查是否达到最小对冲金额
+        if pending['total_value'] >= self.config.min_hedge_value_usd:
+            logger.info(f"✅ 达到最小对冲金额，执行批量对冲")
+            await self._execute_pending_hedge(pending_key)
+        else:
+            logger.info(f"⏳ 金额不足，继续累计 (还需: {self.config.min_hedge_value_usd - pending['total_value']:.2f} USD)")
+
+    async def _execute_pending_hedge(self, pending_key: str):
+        """
+        执行累计的对冲订单
+
+        Args:
+            pending_key: 待对冲订单的键
+        """
+        if pending_key not in self.pending_hedges:
+            logger.error(f"❌ 待对冲订单不存在: {pending_key}")
+            return
+
+        pending = self.pending_hedges[pending_key]
+
+        try:
+            # 构造一个复合的事件用于记录
+            composite_event = type('CompositeEvent', (), {
+                'exchange_code': pending['target_exchange'].exchange_code,
+                'symbol': pending['symbol'],
+                'side': pending['hedge_side'],
+                'order_last_filled_quantity': pending['total_amount'],
+                'last_filled_price': pending['avg_price']
+            })()
+
+            logger.info(f"🚀 执行批量对冲:")
+            logger.info(f"   交易所: {pending['target_exchange'].exchange_code}")
+            logger.info(f"   交易对: {pending['symbol']}")
+            logger.info(f"   方向: {pending['hedge_side']}")
+            logger.info(f"   总数量: {pending['total_amount']:.6f}")
+            logger.info(f"   总价值: {pending['total_value']:.2f} USD")
+            logger.info(f"   平均价格: {pending['avg_price']:.6f}")
+            logger.info(f"   订单数: {len(pending['orders'])}")
+
+            # 执行对冲订单
+            await self._execute_hedge_order(
+                pending['target_exchange'],
+                pending['symbol'],
+                pending['hedge_side'],
+                pending['total_amount'],
+                pending['avg_price'],
+                composite_event
+            )
+
+            # 清理已执行的待对冲订单
+            del self.pending_hedges[pending_key]
+
+        except Exception as e:
+            logger.error(f"❌ 批量对冲执行失败: {e}")
+            logger.exception(e)
+
+            # 发送错误通知
+            await async_notify_telegram(
+                f"⚠️ 批量对冲执行失败\n"
+                f"交易所: {pending['target_exchange'].exchange_code}\n"
+                f"交易对: {pending['symbol']}\n"
+                f"方向: {pending['hedge_side']}\n"
+                f"总数量: {pending['total_amount']:.6f}\n"
+                f"总价值: {pending['total_value']:.2f} USD\n"
+                f"错误: {str(e)}"
+            )
 
     async def _execute_hedge_order(self,
                                    target_exchange: AsyncExchangeAdapter,
@@ -216,47 +337,6 @@ class PositionHedgeEngine:
                 f"错误: {str(e)}"
             )
             return None
-
-    def _extract_hedge_price(self, order_result: BaseOrderModel, fallback_price: float) -> float:
-        """
-        从订单结果中提取实际成交价格
-
-        Args:
-            order_result: 订单结果
-            fallback_price: 备用价格
-
-        Returns:
-            float: 实际成交价格
-        """
-        try:
-
-            # 尝试从不同字段提取价格
-            if isinstance(order_result, dict):
-                # 尝试获取平均价格
-                if 'avgPrice' in order_result and order_result['avgPrice']:
-                    return float(order_result['avgPrice'])
-
-                # 尝试获取成交价格
-                if 'price' in order_result and order_result['price']:
-                    return float(order_result['price'])
-
-                # 尝试从成交详情中获取
-                if 'fills' in order_result and order_result['fills']:
-                    first_fill = order_result['fills'][0]
-                    if 'price' in first_fill:
-                        return float(first_fill['price'])
-
-                # 尝试从其他常见字段获取
-                for field in ['executedPrice', 'filledPrice', 'executionPrice']:
-                    if field in order_result and order_result[field]:
-                        return float(order_result[field])
-
-            logger.warning(f"无法从订单结果中提取价格，使用备用价格: {fallback_price}")
-            return fallback_price
-
-        except Exception as e:
-            logger.warning(f"提取价格时出错: {e}，使用备用价格: {fallback_price}")
-            return fallback_price
 
     def _calculate_price_difference(self, original_price: float, hedge_price: float,
                                     original_side: str, hedge_side: str) -> float:
@@ -381,16 +461,29 @@ class PositionHedgeEngine:
                 # 获取对冲方向
                 hedge_side = self._get_hedge_side(event.side)
 
+                # 计算当前订单的美元价值
+                current_order_value = self._calculate_order_value_usd(hedge_amount, last_filled_price)
+
                 logger.info(f"🔄 检测到对冲机会:")
                 logger.info(
                     f"   源交易所: {event.exchange_code} {event.symbol} {event.side} {filled_quantity} {last_filled_price}")
                 logger.info(f"   目标交易所: {target_exchange.exchange_code} {hedge_side} {hedge_amount}")
-                try:
-                    # 执行对冲订单
-                    await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
-                                                    last_filled_price, event)
-                except Exception as e:
-                    logger.error(f"❌ 对冲订单执行异常: {e}")
+                logger.info(f"   订单价值: {current_order_value:.2f} USD")
+
+                # 检查订单价值
+                if current_order_value >= self.config.min_hedge_value_usd:
+                    # 订单价值足够，直接执行对冲
+                    logger.info(f"💰 订单价值达到最小要求，直接执行对冲")
+                    try:
+                        await self._execute_hedge_order(target_exchange, event.symbol, hedge_side, hedge_amount,
+                                                        last_filled_price, event)
+                    except Exception as e:
+                        logger.error(f"❌ 对冲订单执行异常: {e}")
+                else:
+                    # 订单价值不足，添加到累计列表
+                    logger.info(f"💸 订单价值不足，添加到累计列表")
+                    await self._add_to_pending_hedges(target_exchange, event.symbol, hedge_side,
+                                                    hedge_amount, last_filled_price, event)
 
                 self.stats['total_hedges'] += 1
 
@@ -462,11 +555,48 @@ class PositionHedgeEngine:
             self.is_running = False
             self.processing_orders.clear()
 
+            # 输出累计订单状态
+            if self.pending_hedges:
+                logger.warning(f"⚠️ 引擎停止时仍有 {len(self.pending_hedges)} 个待处理累计订单")
+                for key, pending in self.pending_hedges.items():
+                    logger.warning(f"   {key}: {pending['total_amount']:.6f} ({pending['total_value']:.2f} USD)")
+
+                # 可选：在停止时强制执行所有累计订单
+                # await self._force_execute_all_pending_hedges()
+
             logger.success("✅ 仓位对冲引擎已停止")
 
         except Exception as e:
             logger.error(f"❌ 停止对冲引擎失败: {e}")
             logger.exception(e)
+
+    async def _force_execute_all_pending_hedges(self):
+        """强制执行所有累计的对冲订单"""
+        if not self.pending_hedges:
+            return
+
+        logger.info(f"🚀 强制执行 {len(self.pending_hedges)} 个累计订单")
+        pending_keys = list(self.pending_hedges.keys())
+
+        for pending_key in pending_keys:
+            await self._execute_pending_hedge(pending_key)
+
+    def get_pending_hedges_status(self) -> Dict:
+        """获取累计订单状态"""
+        status = {}
+        for key, pending in self.pending_hedges.items():
+            status[key] = {
+                'symbol': pending['symbol'],
+                'exchange': pending['target_exchange'].exchange_code,
+                'side': pending['hedge_side'],
+                'total_amount': pending['total_amount'],
+                'total_value': pending['total_value'],
+                'avg_price': pending['avg_price'],
+                'order_count': len(pending['orders']),
+                'min_value_needed': max(0, self.config.min_hedge_value_usd - pending['total_value']),
+                'ready_to_execute': pending['total_value'] >= self.config.min_hedge_value_usd
+            }
+        return status
 
     def get_stats(self) -> Dict:
         """获取对冲统计信息"""
