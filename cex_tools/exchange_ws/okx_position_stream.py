@@ -22,6 +22,8 @@ from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
 from cex_tools.exchange_model.position_model import OkxPositionDetail
 from okx.app import OkxSWAP
 
+from cex_tools.okx_future import OkxFuture
+
 
 class OkxPositionWebSocket(PositionWebSocketStream):
     """OKX仓位WebSocket流实现"""
@@ -65,16 +67,7 @@ class OkxPositionWebSocket(PositionWebSocketStream):
 
         # 初始化OKX客户端用于获取合约信息
         try:
-            proxy_host = "https://www.okx.com/"
-            self.okx_client = OkxSWAP(
-                key="",
-                secret="",
-                passphrase="",
-                proxies={},
-                proxy_host=proxy_host,
-            )
-            # 初始化交易所信息
-            self.okx_client.market.get_exchangeInfos(uly="", expire_seconds=24 * 3600)
+            self.okx_client = OkxFuture()
         except Exception as e:
             self.okx_client = None
             logger.error(f"[{self.exchange_code}] 初始化OKX客户端失败: {e}")
