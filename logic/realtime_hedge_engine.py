@@ -1142,6 +1142,8 @@ class RealtimeHedgeEngine:
             text = (f"❌ {pair}({use_exchange.exchange_code}), "
                     f"金额超限, 需要手动执行减仓: {trade_amt} ${imbalance_value:.2f}")
         logger.warning(text)
+        # 有交易 必须立刻刷新持仓缓存
+        await self._update_exchange_info(cache_refresh_delay=0)
         await async_notify_telegram(text)
 
     async def _update_exchange_info(self, cache_refresh_delay=15):

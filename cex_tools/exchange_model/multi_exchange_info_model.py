@@ -350,7 +350,7 @@ class MultiExchangeCombinedInfoModel:
         total_should, total_msg = False, ""
         for pos_info in self.merged_positions:
             unbalanced_value = pos_info["total_amount"] * pos_info["refer_price"]
-            if abs(unbalanced_value) > 50 and len(pos_info["exchanges"]) > 1:
+            if abs(unbalanced_value) > 200 and len(pos_info["exchanges"]) > 1:
                 total_should = True
                 total_msg += f"{pos_info['symbol']}持仓不平衡金额: ${unbalanced_value:.2f}\n"
         for ex in self.exchange_infos:

@@ -1310,7 +1310,7 @@ if __name__ == "__main__":
     )
 
     # 运行主程序
-    # asyncio.run(main())
-    while True:
-        logger.info("....")
-        time.sleep(10)
+    asyncio.run(main())
+    # while True:
+    #     logger.info("....")
+    #     time.sleep(10)
