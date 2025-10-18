@@ -76,7 +76,6 @@ async def get_multi_exchange_info_combined_model(async_exchange_list, find_oppor
                 logger.error(f"获取交易所 {async_exchange_list[i].exchange_code} 信息失败: {result}")
             else:
                 successful_exchange_infos.append(result)
-                logger.info(f"✅ 获取 {result.exchange_code} 交易所信息成功")
 
         # 设置交易所信息列表
         combined_info.exchange_infos = successful_exchange_infos
@@ -90,15 +89,12 @@ async def get_multi_exchange_info_combined_model(async_exchange_list, find_oppor
         # 搜索费率套利机会（如果有至少2个交易所）
         if find_opportunities:
             if len(async_exchange_list) >= 2:
-                logger.info("开始搜索费率套利机会...")
+                logger.info("搜索费率套利机会...")
                 await search_funding_opportunities(combined_info, async_exchange_list,
                                                    top_chance_limit=opportunity_limit)
 
         # 设置耗时
         combined_info.time_cost = time.time() - start_time
-
-        logger.info(
-            f"多交易所综合信息获取完成，共 {len(successful_exchange_infos)} 个交易所，耗时 {combined_info.time_cost:.2f}s")
         return combined_info
 
     except Exception as e:

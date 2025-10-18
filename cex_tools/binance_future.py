@@ -99,6 +99,7 @@ class BinanceFuture(UMFutures):
             :param default_leverage:
             :return: {'symbol': 'PENGUUSDT', 'leverage': 20, 'maxNotionalValue': '200000'}
         """
+        symbol = self.convert_symbol(symbol)
         try:
             return self.ccxt_exchange.set_leverage(default_leverage, self.__convert_to_ccxt_symbol(symbol))
         except Exception as e:
@@ -122,6 +123,7 @@ class BinanceFuture(UMFutures):
         return binance_positions
 
     def get_position(self, symbol):
+        symbol = self.convert_symbol(symbol)
         binance_positions = self.get_position_risk(symbol=symbol, recvWindow=self.recvWindow)
         if binance_positions:
             return BinancePositionDetail(binance_positions[0], self.exchange_code)
@@ -147,6 +149,7 @@ class BinanceFuture(UMFutures):
 
     def get_all_tick_price(self, symbol=None):
         if symbol:
+            symbol = self.convert_symbol(symbol)
             return float(self.ticker_price(symbol)["price"])
         else:
             datas = self.ticker_price(symbol)
