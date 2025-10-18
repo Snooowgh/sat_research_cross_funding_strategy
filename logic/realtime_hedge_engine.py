@@ -184,13 +184,23 @@ class RealtimeHedgeEngine:
     @async_timed_cache(timeout=10 * 60)
     async def _get_pair_market_info(self):
         """获取交易对的市场信息, 10m更新一次"""
-        # 使用异步方法获取市场信息
-        try:
-            spread_stats = await self.spread_analyzer.analyze_spread(symbol=self.symbol,
-                                                                     interval="1m", limit=1000)
-        except Exception as e:
-            logger.warning(f"获取价差统计失败: {e}")
-            spread_stats = None
+        # 使用异步方法获取市场信息，增加三次重试机制
+        max_retries = 3
+        base_delay = 1.0  # 基础延迟时间（秒）
+
+        for attempt in range(max_retries):
+            try:
+                spread_stats = await self.spread_analyzer.analyze_spread(symbol=self.symbol,
+                                                                         interval="1m", limit=1000)
+                break  # 成功获取，跳出重试循环
+            except Exception as e:
+                if attempt < max_retries - 1:  # 不是最后一次尝试
+                    delay = base_delay * (2 ** attempt)  # 指数退避: 1s, 2s, 4s
+                    logger.warning(f"获取价差统计失败 (第{attempt + 1}次尝试): {e}, {delay}秒后重试...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"获取价差统计失败，已达最大重试次数({max_retries}): {e}")
+                    raise e
 
         # 使用完整的交易对符号，而不是简化的symbol
         funding_fetch_start = time.time()
