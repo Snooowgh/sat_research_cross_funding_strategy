@@ -511,8 +511,11 @@ class PositionHedgeEngine:
         """
 
         async def on_order_update(event: OrderUpdateEvent):
-            logger.info(f"📨 订单更新: {exchange_code} {event.symbol} {event.side} {event.order_type} {event.order_status} "
-                        f"size: {event.order_last_filled_quantity} price: {event.last_filled_price}")
+            if event.order_status in [OrderStatusType.FILLED,
+                                      OrderStatusType.NEW,
+                                      OrderStatusType.CANCELED]:
+                logger.info(f"📨 订单更新: {exchange_code} {event.symbol} {event.side} {event.order_type} {event.order_status} "
+                            f"size: {event.order_last_filled_quantity} price: {event.last_filled_price}")
             await self._handle_order_update(event)
 
         return on_order_update
