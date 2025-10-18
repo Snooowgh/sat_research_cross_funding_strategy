@@ -9,6 +9,7 @@
 import asyncio
 from cex_tools.aster_future import AsterFuture
 from cex_tools.binance_future import BinanceFuture
+from cex_tools.binance_unified_future import BinanceUnifiedFuture
 from cex_tools.hyperliquid_future import HyperLiquidFuture
 from cex_tools.lighter_future import LighterFuture
 from cex_tools.bybit_future import BybitFuture
@@ -63,12 +64,13 @@ class MultiExchangeArbitrageParam:
 
         # 交易所映射配置
         self.exchange_configs = {
-            'binance': ('Binance', BinanceFuture, ExchangeConfig.get_binance_config),
-            # 'lighter': ('Lighter', LighterFuture, ExchangeConfig.get_lighter_config),
-            # 'hyperliquid': ('HyperLiquid', HyperLiquidFuture, ExchangeConfig.get_hyperliquid_config),
-            # 'bybit': ('Bybit', BybitFuture, ExchangeConfig.get_bybit_config),
-            # 'aster': ('Aster', AsterFuture, ExchangeConfig.get_aster_config),
-            'okx': ('OKX', OkxFuture, ExchangeConfig.get_okx_config),
+            # 'binance': (BinanceFuture, ExchangeConfig.get_binance_config),
+            'binance_unified': (BinanceUnifiedFuture, ExchangeConfig.get_binance_unified_config),
+            # 'lighter': (LighterFuture, ExchangeConfig.get_lighter_config),
+            # 'hyperliquid': (HyperLiquidFuture, ExchangeConfig.get_hyperliquid_config),
+            # 'bybit': (BybitFuture, ExchangeConfig.get_bybit_config),
+            # 'aster': (AsterFuture, ExchangeConfig.get_aster_config),
+            'okx': (OkxFuture, ExchangeConfig.get_okx_config),
         }
 
         # 初始化交易所列表和实例
@@ -128,12 +130,12 @@ class MultiExchangeArbitrageParam:
             logger.warning(f"⚠️ 不支持的交易所: {exchange_code}")
             return False
 
-        name, exchange_class, config_func = self.exchange_configs[exchange_code]
+        exchange_class, config_func = self.exchange_configs[exchange_code]
 
         try:
             config = config_func()
             if not config:
-                logger.warning(f"⚠️ {name} 交易所配置为空，跳过初始化")
+                logger.warning(f"⚠️ {exchange_code} 交易所配置为空，跳过初始化")
                 return False
 
             exchange_instance = exchange_class(**config)
@@ -146,7 +148,7 @@ class MultiExchangeArbitrageParam:
             return True
 
         except Exception as e:
-            logger.error(f"❌ {name} 交易所初始化失败: {e}")
+            logger.error(f"❌ {exchange_code} 交易所初始化失败: {e}")
             return False
 
     def get_available_exchange_codes(self):

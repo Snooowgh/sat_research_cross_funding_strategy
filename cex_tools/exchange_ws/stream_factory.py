@@ -26,6 +26,7 @@ class StreamFactory:
     # 交易所流类映射
     STREAM_CLASSES = {
         'binance': BinanceOrderBookStreamDirect,
+        'binance_unified': BinanceOrderBookStreamDirect,
         'lighter': LighterOrderBookStreamAsync,
         'hyperliquid': HyperliquidOrderBookStream,
         'bybit': BybitOrderBookStreamAsync,

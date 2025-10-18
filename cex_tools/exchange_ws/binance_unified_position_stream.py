@@ -17,7 +17,7 @@ import websockets.client
 from cex_tools.cex_enum import ExchangeEnum
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent
 from cex_tools.exchange_ws.position_stream import PositionWebSocketStream
-from cex_tools.exchange_model.position_model import BinancePositionDetail
+from cex_tools.exchange_model.position_model import BinancePositionDetail, BinanceUnifiedPositionDetail
 from binance.um_futures import UMFutures
 
 from binance_common.configuration import ConfigurationWebSocketStreams, ConfigurationRestAPI
@@ -39,7 +39,7 @@ class BinanceUnifiedPositionWebSocket(PositionWebSocketStream):
             sandbox: 是否使用沙盒环境
             **kwargs: 其他配置参数
         """
-        super().__init__(ExchangeEnum.BINANCE, **kwargs)
+        super().__init__(ExchangeEnum.BINANCE_UNIFIED, **kwargs)
         self.api_key = api_key
         self.secret = secret
         self.sandbox = sandbox
@@ -55,8 +55,8 @@ class BinanceUnifiedPositionWebSocket(PositionWebSocketStream):
         #
         # WebSocket配置
         self.base_ws_url = (
-            "wss://fstream.binancefuture.com/pm" if sandbox
-            else "wss://fstream.binance.com/pm"
+            "wss://fstream.binancefuture.com/pm/ws" if sandbox
+            else "wss://fstream.binance.com/pm/ws"
         )
 
         # 连接管理
@@ -274,7 +274,7 @@ class BinanceUnifiedPositionWebSocket(PositionWebSocketStream):
                     ping_timeout=10
                 ) as ws:
                     self._ws_connection = ws
-                    logger.debug(f"[{self.exchange_code}] WebSocket连接已建立: {ws_url}")
+                    logger.debug(f"[{self.exchange_code}] WebSocket连接已建立")
 
                     # 重连成功，重置计数器
                     if retry_count > 0:
@@ -385,7 +385,8 @@ class BinanceUnifiedPositionWebSocket(PositionWebSocketStream):
         """
         try:
             positions = self.rest_client.rest_api.query_um_position_information().data()
-            self._last_positions = positions
+            active_positions = list(filter(lambda pos: float(pos.position_amt or 0) != 0, positions))
+            self._last_positions = [BinanceUnifiedPositionDetail(pos, self.exchange_code) for pos in active_positions]
             logger.info(f"[{self.exchange_code}] 初始化 {len(self._last_positions)} 个仓位")
 
         except Exception as e:
@@ -435,14 +436,15 @@ class BinanceUnifiedPositionWebSocket(PositionWebSocketStream):
 async def main():
     a = BinanceUnifiedPositionWebSocket(api_key="JysfgWvPEc04s7SwdNmLscEOAMecCTPNMjr6NCBN3kQPz9lvpRNP44BoG4Z5aOrB",
                                         secret="ZGFMevlQlx66pZ6OY4lUmip2G5Lz4zHztSGrhTsq4gOvQIb0UTnhMAn8JrRcIl6H")
-    try:
-        connection = await a.rest_client.websocket_streams.create_connection()
-        stream = await connection.user_data(listenKey=(await a._get_listen_key()))
-        print(stream)
-        stream.on("message", lambda data: {print(data)})
-        time.sleep(10)
-    except Exception as e:
-        print(e)
+    await a.start()
+    # try:
+    #     connection = await a.rest_client.websocket_streams.create_connection()
+    #     stream = await connection.user_data(listenKey=(await a._get_listen_key()))
+    #     print(stream)
+    #     stream.on("message", lambda data: {print(data)})
+    #     time.sleep(10)
+    # except Exception as e:
+    #     print(e)
 
 if __name__ == '__main__':
     asyncio.run(main())

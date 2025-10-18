@@ -15,6 +15,21 @@ class ExchangeConfig:
     """交易所配置管理类"""
 
     @staticmethod
+    def get_binance_unified_config() -> Dict[str, Any]:
+        """获取Binance交易所配置"""
+        try:
+            return {
+                'key': env_config.require_str('BINANCE_UNIFIED_API_KEY'),
+                'secret': env_config.require_str('BINANCE_UNIFIED_SECRET_KEY'),
+                'erc20_deposit_addr': env_config.get_str('BINANCE_UNIFIED_ERC20_DEPOSIT_ADDR', ''),
+                'maker_fee_rate': env_config.get_float('BINANCE_UNIFIED_MAKER_FEE_RATE', 0.00018),
+                'taker_fee_rate': env_config.get_float('BINANCE_UNIFIED_TAKER_FEE_RATE', 0.00045),
+            }
+        except ValueError as e:
+            logger.error(f"获取Binance配置失败: {e}")
+            return {}
+
+    @staticmethod
     def get_binance_config() -> Dict[str, Any]:
         """获取Binance交易所配置"""
         try:
@@ -164,6 +179,17 @@ class ExchangeConfig:
             'log_console_enabled': env_config.get_bool('LOG_CONSOLE_ENABLED', True)
         }
 
+    @staticmethod
+    def get_binance_unified_ws_config() -> Dict[str, Any]:
+        """获取Binance交易所配置"""
+        try:
+            return {
+                'api_key': env_config.require_str('BINANCE_UNIFIED_API_KEY'),
+                'secret': env_config.require_str('BINANCE_UNIFIED_SECRET_KEY'),
+            }
+        except ValueError as e:
+            logger.error(f"获取Binance配置失败: {e}")
+            return {}
 
     @staticmethod
     def get_binance_ws_config() -> Dict[str, Any]:

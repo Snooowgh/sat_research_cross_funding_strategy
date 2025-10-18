@@ -211,6 +211,9 @@ class BinanceUnifiedFuture:
             # 限价单需要价格
             if order_type.upper() == "LIMIT" and price is not None:
                 price = float(self.convert_price(symbol, price))
+                time_in_force="GTC"
+            else:
+                time_in_force = None
 
             # 止损单需要stopPrice
             if "stopPrice" in kwargs and kwargs["stopPrice"] is not None:
@@ -221,7 +224,7 @@ class BinanceUnifiedFuture:
             response = self.rest_client.new_um_order(symbol=symbol,
                                                      side=side,
                                                      type=order_type,
-                                                     time_in_force="GTC",
+                                                     time_in_force=time_in_force,
                                                      quantity=quantity,
                                                      reduce_only=kwargs.get("reduce_only", False),
                                                      price=price)
@@ -373,6 +376,7 @@ class BinanceUnifiedFuture:
 if __name__ == '__main__':
     a = BinanceUnifiedFuture(key="JysfgWvPEc04s7SwdNmLscEOAMecCTPNMjr6NCBN3kQPz9lvpRNP44BoG4Z5aOrB",
                             secret="ZGFMevlQlx66pZ6OY4lUmip2G5Lz4zHztSGrhTsq4gOvQIb0UTnhMAn8JrRcIl6H")
+    # print(a.make_new_order("TRX", "SELL", "MARKET", 19))
     # print(a.rest_client.account_information().data())
     # print(a.get_all_cur_positions())
     # 交易相关测试

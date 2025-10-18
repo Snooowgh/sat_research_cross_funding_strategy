@@ -9,6 +9,8 @@
 import asyncio
 from typing import Dict, Optional, Callable, List
 from loguru import logger
+
+from cex_tools.exchange_ws.binance_unified_position_stream import BinanceUnifiedPositionWebSocket
 from config import ExchangeConfig
 
 # 导入仓位WebSocket流实现
@@ -30,6 +32,7 @@ class PositionStreamFactory:
     # 支持的交易所流类映射
     STREAM_CLASSES = {
         'binance': BinancePositionWebSocket,
+        'binance_unified': BinanceUnifiedPositionWebSocket,
         'hyperliquid': HyperliquidPositionWebSocket,
         'okx': OkxPositionWebSocket,
         'bybit': BybitPositionWebSocket,
@@ -39,6 +42,7 @@ class PositionStreamFactory:
 
     EXCHANGE_WS_CONFIGS = {
         'binance': ExchangeConfig.get_binance_ws_config,
+        'binance_unified': ExchangeConfig.get_binance_unified_ws_config,
         'lighter': ExchangeConfig.get_lighter_ws_config,
         'hyperliquid': ExchangeConfig.get_hyperliquid_ws_config,
         'bybit': ExchangeConfig.get_bybit_ws_config,
@@ -75,6 +79,7 @@ class PositionStreamFactory:
 
         except Exception as e:
             logger.error(f"❌ 创建 {exchange_code} 仓位WebSocket流失败: {e}")
+            logger.exception(e)
             return None
 
     @staticmethod
