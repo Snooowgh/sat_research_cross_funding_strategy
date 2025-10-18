@@ -32,7 +32,7 @@ class TradeMode(Enum):
     """交易模式枚举"""
     TAKER_TAKER = "taker_taker"  # 原有的taker-taker模式
     LIMIT_TAKER = "limit_taker"  # 新增的limit-taker模式
-    
+
 
 @dataclass
 class RiskConfig:
@@ -332,7 +332,7 @@ class RealtimeHedgeEngine:
         #
         # # 等待所有取消操作完成
         # await asyncio.gather(*cancel_tasks, return_exceptions=True)
-        
+
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
         """
         Daemon模式下的Z-Score价差策略
@@ -912,7 +912,8 @@ class RealtimeHedgeEngine:
             except Exception as e:
                 logger.warning(f"强制减仓 {self.symbol} {self.exchange_pair} 获取订单均价失败: {e}")
             await asyncio.sleep(2)
-            await self._update_exchange_info(cache_refresh_delay=1)
+            # 有交易，立刻刷新缓存
+            await self._update_exchange_info(cache_refresh_delay=0)
         if force_reduce_value > 0:
             await async_notify_telegram(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} "
                                         f"触发强制减仓: ${force_reduce_value:.2f} "
@@ -1120,6 +1121,8 @@ class RealtimeHedgeEngine:
             return
         mid_price = await use_exchange.get_tick_price(self.symbol)
         trade_amt = abs(imbalance_amt)
+        logger.info(f"⚠️ {pair} ({use_exchange.exchange_code}) 仓位不均衡下单 {side} 数量 {trade_amt} 参考价格: {mid_price}"
+                    f"不平衡数量: {imbalance_amt} ${imbalance_value:.4f}")
         if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit:
             try:
                 await use_exchange.make_new_order(self.trade_config.pair1,
@@ -1131,9 +1134,10 @@ class RealtimeHedgeEngine:
                         f"自动平衡仓位, 减仓:  {imbalance_amt} ${imbalance_value:.4f}")
             except Exception as e:
                 await other_exchange.make_new_order(self.trade_config.pair2,
-                                              side,
-                                              order_type="MARKET",
-                                              quantity=trade_amt, price=mid_price)
+                                                  side,
+                                                  order_type="MARKET",
+                                                  amount=trade_amt,
+                                                    price=mid_price)
                 text = (f"⚠️⚠️ {pair}({other_exchange.exchange_code}), "
                         f"自动执行加仓: {imbalance_amt} ${imbalance_value:.4f} "
                         f"| ❌{use_exchange.exchange_code}减仓交易异常:{e}")
