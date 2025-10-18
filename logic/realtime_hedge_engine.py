@@ -66,7 +66,7 @@ class TradeConfig:
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
     trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
-    make_limit_order_interval_limit_sec: float = 0.1  # 创建限价单的间隔时间限制（秒）
+    make_limit_order_interval_limit_sec: float = 10  # 创建限价单的间隔时间限制（秒）
 
 
 @dataclass
@@ -200,7 +200,7 @@ class RealtimeHedgeEngine:
         return spread_stats, funding_rate1, funding_rate2
 
     def _get_risk_data(self) -> MultiExchangeCombinedInfoModel:
-        if time.time() - self.exchange_combined_info_cache.get("update_time") > 31 * 60:
+        if time.time() - self.exchange_combined_info_cache.get("update_time") > 5:
             logger.warning("风控缓存数据未更新，可能存在风险")
         return self.exchange_combined_info_cache.get("risk_data")
 
@@ -915,24 +915,14 @@ class RealtimeHedgeEngine:
         if self._timeout_enabled:
             logger.info(f"⏱️ {self.symbol} {self.exchange_pair}超时: {self.trade_config.no_trade_timeout_sec}秒")
 
-        # 初始化定时任务相关变量
-        last_risk_check_time = time.time()
-        RISK_CHECK_INTERVAL = 30  # 30秒执行一次风控检查
-
         while self._running and (self._remaining_amount > 0 or self.trade_config.daemon_mode):
             try:
+                # 1. 更新仓位信息
+                await self._update_exchange_info()
                 # 定时风控检查：每30秒执行一次
-                current_time = time.time()
-                if current_time - last_risk_check_time > RISK_CHECK_INTERVAL:
-                    try:
-                        # 1. 更新仓位信息
-                        await self._update_exchange_info()
-                        # 2. 强制减仓风控检查
-                        if self.trade_config.daemon_mode:
-                            await self.auto_force_reduce_position_to_safe()
-                        last_risk_check_time = current_time
-                    except Exception as e:
-                        logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 定时风控检查异常: {e}")
+                # 2. 强制减仓风控检查
+                if self.trade_config.daemon_mode:
+                    await self.auto_force_reduce_position_to_safe()
 
                 if self.trade_config.daemon_mode and not self._get_risk_data():
                     logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 获取风控数据缓存失败... 等待")
@@ -1143,7 +1133,7 @@ class RealtimeHedgeEngine:
 
 
     async def _update_exchange_info(self):
-        if self.exchange_combined_info_cache['update_time'] - time.time() > 60:
+        if self.exchange_combined_info_cache['update_time'] - time.time() > 10:
             logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
             risk_data, update_time = await self.update_exchange_info_helper()
             # 分发给所有引擎进程

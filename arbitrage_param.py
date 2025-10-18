@@ -82,6 +82,7 @@ class MultiExchangeArbitrageParam:
         # 兼容性属性
         self.hyperliquid_exchange = None
         self.binance_exchange = None
+        self.binance_unified_exchange = None
         self.lighter_exchange = None
         self.aster_exchange = None
         self.bybit_exchange = None
