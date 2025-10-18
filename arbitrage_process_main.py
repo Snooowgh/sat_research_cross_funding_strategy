@@ -473,6 +473,10 @@ class MultiProcessArbitrageManager:
         """为白名单代币和持仓代币启动引擎"""
         if self.cached_risk_data is None:
             raise Exception("风控数据未初始化，无法启动引擎")
+        # 如果是 limit_taker 模式，启动 PositionHedgeEngine
+        if self.is_limit_taker_mode:
+            await self._start_position_hedge_engine()
+            await asyncio.sleep(3)
         start_engine_symbol_list = list(set(ArbitrageWhiteListParam.SYMBOL_LIST) | set(self.cached_risk_data.holding_symbol_list))
         # start_engine_symbol_list = ArbitrageWhiteListParam.SYMBOL_LIST
         # 顺序启动引擎，避免同时发起过多API请求
@@ -506,9 +510,6 @@ class MultiProcessArbitrageManager:
                 # 即使失败也继续启动下一个引擎
                 continue
 
-        # 如果是 limit_taker 模式，启动 PositionHedgeEngine
-        if self.is_limit_taker_mode:
-            await self._start_position_hedge_engine()
 
     async def _start_position_hedge_engine(self):
         """启动PositionHedgeEngine进程"""
