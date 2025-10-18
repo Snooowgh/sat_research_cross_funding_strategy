@@ -672,7 +672,7 @@ class MultiProcessArbitrageManager:
                 find_opportunities=find_opportunities,
                 opportunity_limit=5
             )
-            logger.debug(f"🔄 风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
+            logger.debug(f"🔄 MAIN风控数据更新(间隔:{time.time()-self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
             self.last_risk_update_time = time.time()
 
             # 只有在非关闭状态下才发送风控通知
@@ -682,7 +682,7 @@ class MultiProcessArbitrageManager:
                     await async_notify_telegram(f"❌❌ {','.join(list(self.arbitrage_param.async_exchanges.keys()))}风控提醒:\n{msg}")
             # 分发给所有引擎进程
             self.shared_risk_data['risk_data'] = self.cached_risk_data
-            self.shared_risk_data['update_time'] = time.time()
+            self.shared_risk_data['update_time'] = self.last_risk_update_time
             if find_opportunities:
                 logger.info(f"✅ 风控数据:\n{self.cached_risk_data}")
         except Exception as e:

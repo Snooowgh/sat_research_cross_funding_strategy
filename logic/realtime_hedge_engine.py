@@ -67,6 +67,7 @@ class TradeConfig:
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
     trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
     make_limit_order_interval_limit_sec: float = 10  # 创建限价单的间隔时间限制（秒）
+    limit_order_timeout_sec: float = 1
 
 
 @dataclass
@@ -175,7 +176,7 @@ class RealtimeHedgeEngine:
         self._timeout_enabled = trade_config.no_trade_timeout_sec > 0
 
         # LIMIT-TAKER模式下的挂单状态管理
-        self._last_signal: Optional[TradeSignal] = None  # 最后一次有效的交易信号
+        self._last_limit_taker_signal: Optional[TradeSignal] = None  # 最后一次有效的交易信号
 
     async def update_exchange_info_helper(self):
         raise Exception("未传参！!")
@@ -200,8 +201,8 @@ class RealtimeHedgeEngine:
         return spread_stats, funding_rate1, funding_rate2
 
     def _get_risk_data(self) -> MultiExchangeCombinedInfoModel:
-        if time.time() - self.exchange_combined_info_cache.get("update_time") > 5:
-            logger.warning("风控缓存数据未更新，可能存在风险")
+        if time.time() - self.exchange_combined_info_cache.get("update_time") > 30:
+            logger.warning("风控缓存数据未及时更新，可能存在风险")
         return self.exchange_combined_info_cache.get("risk_data")
 
     def _get_max_open_notional_value(self):
@@ -750,7 +751,7 @@ class RealtimeHedgeEngine:
                                           reduceOnly=(not signal.is_add_position()))
         # 更新最后信号时间
         signal.trade_time = time.time()
-        self._last_signal = signal
+        self._last_limit_taker_signal = signal
 
         limit_msg = (f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER限价单已挂: "
                     f"订单1: N/A 订单2: {order2.get('orderId', 'N/A')} "
@@ -924,6 +925,14 @@ class RealtimeHedgeEngine:
                 if self.trade_config.daemon_mode:
                     await self.auto_force_reduce_position_to_safe()
 
+                # LIMIT-TAKER模式：信号超时取消所有挂单
+                if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
+                        self._last_limit_taker_signal and
+                        time.time() - self._last_limit_taker_signal > self.trade_config.limit_order_timeout_sec):
+                    logger.info(f"🚫 {self.symbol} {self.exchange_pair} 挂单超时, 取消所有订单")
+                    await self._cancel_all_orders()
+                    self._last_limit_taker_signal = None
+
                 if self.trade_config.daemon_mode and not self._get_risk_data():
                     logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 获取风控数据缓存失败... 等待")
                     await asyncio.sleep(1)  # 订单簿数据or 缓存未就绪，短暂等待
@@ -973,10 +982,10 @@ class RealtimeHedgeEngine:
                 if not passed:
                     # LIMIT-TAKER模式：信号不满足时取消所有挂单
                     if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
-                        self._last_signal):
-                        logger.info(f"🚫 {self.symbol} {self.exchange_pair} 信号不满足，取消所有挂单: {msg}")
+                        self._last_limit_taker_signal):
+                        logger.info(f"🚫 {self.symbol} {self.exchange_pair} 挂单信号不满足，取消所有挂单: {msg}")
                         await self._cancel_all_orders()
-                        self._last_signal = None
+                        self._last_limit_taker_signal = None
 
                     # 不满足条件，记录日志但继续寻找机会（避免刷屏）
                     if "收益率不足" in msg:
@@ -1026,12 +1035,10 @@ class RealtimeHedgeEngine:
                     logger.warning("计算的交易数量为0，跳过本次交易")
                     await asyncio.sleep(0.05)
                     continue
-
+                # 信号有效
                 if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER
-                        and self._last_signal is not None
-                        and self._last_signal.trade_time is not None
-                        and (time.time() - self._last_signal.trade_time) < self.trade_config.make_limit_order_interval_limit_sec):
-                    logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 下单频率限制..")
+                        and self._last_limit_taker_signal is not None):
+                    # 挂单仍然存在 不再重复挂单
                     continue
                 # 执行交易
                 await self._execute_trade(signal, trade_amount)
@@ -1074,7 +1081,7 @@ class RealtimeHedgeEngine:
         """
         # LIMIT-TAKER模式下，如果存在最后信号说明可能有挂单，需要检查
         if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
-            self._last_signal is not None):
+            self._last_limit_taker_signal is not None):
             # 检查两个交易所是否存在活跃挂单
             has_orders1 = await self._has_active_orders(self.exchange1, self.trade_config.pair1)
             has_orders2 = await self._has_active_orders(self.exchange2, self.trade_config.pair2)
@@ -1082,9 +1089,6 @@ class RealtimeHedgeEngine:
             if has_orders1 or has_orders2:
                 logger.info(f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER模式下存在活跃挂单，跳过仓位平衡")
                 return
-            else:
-                # 挂单都成交了
-                self._last_signal = None
 
         risk_data = self.exchange_combined_info_cache['risk_data']
         imbalance_value = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
@@ -1134,12 +1138,13 @@ class RealtimeHedgeEngine:
 
     async def _update_exchange_info(self):
         if time.time() - self.exchange_combined_info_cache['update_time'] > 4:
-            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
+            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控更新")
             risk_data, update_time = await self.update_exchange_info_helper()
             # 分发给所有引擎进程
             self.exchange_combined_info_cache['risk_data'] = risk_data
             self.exchange_combined_info_cache['update_time'] = update_time
         else:
+            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 使用风控缓存 ({time.time() - self.exchange_combined_info_cache['update_time']:.2f}s)")
             risk_data = self.exchange_combined_info_cache['risk_data']
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
