@@ -657,7 +657,9 @@ class RealtimeHedgeEngine:
                     await self._execute_limit_taker_trade(signal, amount)
                 except Exception as e:
                     if "available margin (in USD) is too low" in str(e):
-                        logger.warning(f"⚠️ 可用保证金不足.. 不能下单加仓")
+                        logger.warning(f"⚠️ {self.symbol} 可用保证金不足.. 不能下单加仓")
+                    elif "to reduce or close" in str(e):
+                        logger.warning(f"⚠️ {self.symbol} 仓位已减仓完毕")
                     else:
                         raise e
             else:
@@ -871,11 +873,12 @@ class RealtimeHedgeEngine:
                 break
             reduce_side1 = self._position2.position_side
             reduce_side2 = self._position1.position_side
-            amount = self._position1.positionAmt
+            amount = abs(self._position1.positionAmt)
             mid_price = await self.exchange1.get_tick_price(self.symbol)
             while amount * mid_price > self.trade_config.max_order_value_usd:
                 amount = amount / 2
             amount = await self.exchange1.convert_size(self.trade_config.pair1, amount)
+            logger.warning(f"{self.symbol} {self.exchange_pair} 执行强制平仓: {amount:.4f} (${amount * mid_price:.2f})")
             order1_task = asyncio.create_task(
                 self._place_order_exchange1(self.trade_config.pair1, reduce_side1, amount, mid_price,
                                             reduceOnly=True)
@@ -908,7 +911,8 @@ class RealtimeHedgeEngine:
                 total_spread_profit += spread_profit
             except Exception as e:
                 logger.warning(f"强制减仓 {self.symbol} {self.exchange_pair} 获取订单均价失败: {e}")
-            await self._update_exchange_info()
+            await asyncio.sleep(2)
+            await self._update_exchange_info(cache_refresh_delay=1)
         if force_reduce_value > 0:
             await async_notify_telegram(f"⚠️ ⚠️ {self.symbol} {self.exchange_pair} "
                                         f"触发强制减仓: ${force_reduce_value:.2f} "
@@ -1140,8 +1144,8 @@ class RealtimeHedgeEngine:
         logger.warning(text)
         await async_notify_telegram(text)
 
-    async def _update_exchange_info(self):
-        if time.time() - self.exchange_combined_info_cache['update_time'] > 15:
+    async def _update_exchange_info(self, cache_refresh_delay=15):
+        if time.time() - self.exchange_combined_info_cache['update_time'] > cache_refresh_delay:
             logger.debug(f"🔄 {self.exchange_combined_info_cache['updater']} 风控更新超时 "
                          f"{self.symbol} {self.exchange_pair} 执行定时风控更新")
             risk_data, update_time = await self.update_exchange_info_helper()
