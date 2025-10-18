@@ -674,7 +674,7 @@ class MultiProcessArbitrageManager:
             if not self._is_shutting_down:
                 should, msg = self.cached_risk_data.should_notify_risk()
                 if should:
-                    await async_notify_telegram(f"❌❌ {','.join(list(self.arbitrage_param.async_exchanges.keys()))}风控提醒:\n{msg}")
+                    await async_notify_telegram(f"❌❌ {','.join(list(self.arbitrage_param.async_exchanges.keys()))} 风控提醒:\n{msg}")
             # 分发给所有引擎进程
             self.shared_risk_data['risk_data'] = self.cached_risk_data
             self.shared_risk_data['update_time'] = self.last_risk_update_time
@@ -1310,4 +1310,7 @@ if __name__ == "__main__":
     )
 
     # 运行主程序
-    asyncio.run(main())
+    # asyncio.run(main())
+    while True:
+        logger.info("....")
+        time.sleep(10)
