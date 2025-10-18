@@ -66,6 +66,7 @@ class TradeConfig:
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
     trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
+    make_limit_order_interval_limit_sec: float = 0.1  # 创建限价单的间隔时间限制（秒）
 
 
 @dataclass
@@ -91,6 +92,7 @@ class TradeSignal:
     risk_message: str = ""
     _is_add_position: bool = None
     signal_generate_start_time: float = None
+    trade_time: float = None
 
     def is_zscore_triggered(self):
         optimal_side1 = None
@@ -747,6 +749,7 @@ class RealtimeHedgeEngine:
         order2 = await self._place_limit_order_exchange2(self.trade_config.pair2, signal.side2, amount, price2,
                                           reduceOnly=(not signal.is_add_position()))
         # 更新最后信号时间
+        signal.trade_time = time.time()
         self._last_signal = signal
 
         limit_msg = (f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER限价单已挂: "
@@ -1034,6 +1037,12 @@ class RealtimeHedgeEngine:
                     await asyncio.sleep(0.05)
                     continue
 
+                if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER
+                        and self._last_signal
+                        and self._last_signal.trade_time is not None\
+                        and (time.time() - self._last_signal.trade_time) < self.trade_config.make_limit_order_interval_limit_sec):
+                    logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 下单频率限制..")
+                    continue
                 # 执行交易
                 await self._execute_trade(signal, trade_amount)
 
