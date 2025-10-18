@@ -55,7 +55,8 @@ class EngineHealthMetrics:
 class ManagerConfig:
     """管理器配置"""
     # 更新间隔
-    risk_update_interval_min: int = 15  # 风控数据更新间隔(分钟)
+    risk_opportunities_update_interval_min: int = 15  # 风控+机会数据更新间隔(分钟)
+    risk_update_interval_sec: int = 3  # 风控数据更新间隔(秒)
 
     # 通知配置
     enable_notifications: bool = True
@@ -463,6 +464,7 @@ class MultiProcessArbitrageManager:
             # 立即分发给共享字典，确保进程启动时就能获取到
             self.shared_risk_data['risk_data'] = self.cached_risk_data
             self.shared_risk_data['update_time'] = time.time()
+            self.shared_risk_data['updater'] = "main-init"
             logger.success(f"✅ 风控数据:\n {self.cached_risk_data}")
 
         except Exception as e:
@@ -676,6 +678,7 @@ class MultiProcessArbitrageManager:
             # 分发给所有引擎进程
             self.shared_risk_data['risk_data'] = self.cached_risk_data
             self.shared_risk_data['update_time'] = self.last_risk_update_time
+            self.shared_risk_data['updater'] = "main-updater"
             if find_opportunities:
                 logger.info(f"✅ 风控数据:\n{self.cached_risk_data}")
         except Exception as e:
@@ -1071,9 +1074,10 @@ class MultiProcessArbitrageManager:
                 await self._send_status_notification()
 
                 # 等待下一次循环，使用短间隔以便快速响应停止信号
-                wait_interval = self.config.risk_update_interval_min * 60
+                wait_interval = self.config.risk_opportunities_update_interval_min * 60
                 # 分解长等待为多个短等待，确保快速响应
-                for _ in range(0, wait_interval, 3):  # 每3秒检查一次
+                for _ in range(0, wait_interval, self.config.risk_update_interval_sec):  # 每3秒检查一次
+                    # 共享风控数据
                     await self._update_risk_data(find_opportunities=False)
                     if self.shutdown_event.is_set():
                         logger.info("🛑 管理器收到停止信号，退出主循环")

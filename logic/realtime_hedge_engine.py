@@ -1137,14 +1137,15 @@ class RealtimeHedgeEngine:
 
 
     async def _update_exchange_info(self):
-        if time.time() - self.exchange_combined_info_cache['update_time'] > 4:
-            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控更新")
+        if time.time() - self.exchange_combined_info_cache['update_time'] > 15:
+            logger.debug(f"🔄 {self.exchange_combined_info_cache['updater']} 风控更新超时 "
+                         f"{self.symbol} {self.exchange_pair} 执行定时风控更新")
             risk_data, update_time = await self.update_exchange_info_helper()
             # 分发给所有引擎进程
             self.exchange_combined_info_cache['risk_data'] = risk_data
             self.exchange_combined_info_cache['update_time'] = update_time
+            self.exchange_combined_info_cache['updater'] = f"{self.symbol}-{self.exchange_pair}"
         else:
-            # logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 使用风控缓存 ({time.time() - self.exchange_combined_info_cache['update_time']:.2f}s)")
             risk_data = self.exchange_combined_info_cache['risk_data']
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
