@@ -58,6 +58,7 @@ class BinanceUnifiedFuture:
             timeout: 请求超时时间
             testnet: 是否使用测试网
         """
+        self.exchange_code = ExchangeEnum.BINANCE_UNIFIED
         self.future_base_url = "https://fapi.binance.com"
         self.api_key = key
         self.api_secret = secret
@@ -65,7 +66,9 @@ class BinanceUnifiedFuture:
                                              base_path=DERIVATIVES_TRADING_PORTFOLIO_MARGIN_REST_API_PROD_URL)
         self.client = DerivativesTradingPortfolioMargin(config_rest_api=configuration)
         self.rest_client = self.client.rest_api
-        self.exchange_code = ExchangeEnum.BINANCE_UNIFIED
+        if self.rest_client.get_um_current_position_mode().data().dual_side_position is True:
+            logger.info(f"{self.exchange_code} 当前账户双向持仓模式，已切换为单向持仓模式")
+            self.rest_client.change_um_position_mode("false")
         self.testnet = testnet
 
         # 配置参数
