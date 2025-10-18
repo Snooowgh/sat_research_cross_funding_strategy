@@ -616,21 +616,21 @@ class RealtimeHedgeEngine:
                 return False, f"平仓保底价差收益率不足 ({signal.spread_rate:.4%} < {self.risk_config.min_profit_rate:.4%})"
 
         # 5. 增强检查：市场异常状态检测
-        if self.trade_config.daemon_mode:
-            # 在持续模式下，额外检查资金费率套利是否仍然有效
-            try:
-                spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
-                ma_spread = spread_stats.mean_spread if spread_stats else 0.0
-
-                # 检查当前价差是否偏离历史均值过大（可能市场异常）
-                if ma_spread != 0:
-                    current_mid_diff = (self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) / self._latest_orderbook2.mid_price
-                    deviation_ratio = abs(current_mid_diff - ma_spread) / abs(ma_spread) if ma_spread != 0 else 0
-                    if deviation_ratio > 10.0:  # 价差偏离历史均值超过3倍
-                        return False, f"价差异常:{current_mid_diff:.4%} (偏离历史均值{deviation_ratio:.1f}倍)，市场可能不稳定"
-
-            except Exception as e:
-                logger.warning(f"市场状态检查异常: {e}")
+        # if self.trade_config.daemon_mode:
+        #     # 在持续模式下，额外检查资金费率套利是否仍然有效
+        #     try:
+        #         spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
+        #         ma_spread = spread_stats.mean_spread if spread_stats else 0.0
+        #
+        #         # 检查当前价差是否偏离历史均值过大（可能市场异常）
+        #         if ma_spread != 0:
+        #             current_mid_diff = (self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) / self._latest_orderbook2.mid_price
+        #             deviation_ratio = abs(current_mid_diff - ma_spread) / abs(ma_spread) if ma_spread != 0 else 0
+        #             if deviation_ratio > 10.0:  # 价差偏离历史均值超过3倍
+        #                 return False, f"价差异常:{current_mid_diff:.4%} (偏离历史均值{deviation_ratio:.1f}倍)，市场可能不稳定"
+        #
+        #     except Exception as e:
+        #         logger.warning(f"市场状态检查异常: {e}")
 
         # 6. 动态收益率检查：在daemon模式或Z-Score策略下，优先使用计算的最优收益率
         if self.trade_config.daemon_mode and hasattr(signal, 'optimal_min_spread_profit_rate'):

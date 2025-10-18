@@ -157,6 +157,10 @@ class BinanceUnifiedFuture:
             logger.error(f"{self.exchange_code} 获取余额失败: {e}")
             return []
 
+    @timed_cache(timeout=3)
+    def _get_account_info(self):
+        return self.rest_client.account_information().data()
+
     def get_available_balance(self, asset: str = "USDT") -> float:
         """获取可用余额"""
         try:
@@ -172,19 +176,13 @@ class BinanceUnifiedFuture:
 
     def get_available_margin(self) -> float:
         """获取可用保证金"""
-        return self.get_available_balance("USDT") + self.get_available_balance("USDC")
+        return float(self._get_account_info().total_available_balance)
 
     def get_total_margin(self) -> float:
         """获取总保证金"""
         try:
             # 根据账户类型选择合适的端点
-            balance_list = self.get_balance_list_cache()
-            total_wallet_balance = 0
-            for info in balance_list:
-                if info.asset in ["USDT", "USDC"]:
-                    # 统一账户使用availableBalance
-                    total_wallet_balance += float(info.total_wallet_balance)
-            return total_wallet_balance
+            return float(self._get_account_info().account_equity)
         except Exception as e:
             logger.error(f"{self.exchange_code} 获取总保证金失败: {e}")
             return 0
@@ -311,24 +309,14 @@ class BinanceUnifiedFuture:
 
     def get_cross_margin_ratio(self) -> float:
         """获取维持保证金比例 - 使用Portfolio Margin"""
-        try:
-            # 使用Portfolio Margin SDK获取账户信息
-            account_info = self.rest_client.account_information().data()
-            total_maint_margin = float(account_info.account_maint_margin)
-            total_wallet_balance = float(account_info.account_equity)
+        # 使用Portfolio Margin SDK获取账户信息
+        account_info = self._get_account_info()
+        total_maint_margin = float(account_info.account_maint_margin)
+        total_wallet_balance = float(account_info.account_equity)
 
-            if total_wallet_balance == 0:
-                return 0
-            return total_maint_margin / total_wallet_balance
-        except Exception as e:
-            logger.error(f"{self.exchange_code} 获取保证金比例失败: {e}")
-            # 如果Portfolio Margin获取失败，尝试使用基础接口
-            logger.warning(f"尝试使用基础Binance接口获取保证金比例...")
-            try:
-                return self.base_binance_future.get_cross_margin_ratio()
-            except Exception as e2:
-                logger.error(f"基础Binance接口获取保证金比例也失败: {e2}")
-                return 0
+        if total_wallet_balance == 0:
+            return 0
+        return total_maint_margin / total_wallet_balance
 
     def get_funding_rate_history(self, symbol: str, limit: int = 100,
                                  start_time: int = None, end_time: int = None,

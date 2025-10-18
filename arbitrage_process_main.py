@@ -683,7 +683,7 @@ class MultiProcessArbitrageManager:
                 logger.info(f"✅ 风控数据:\n{self.cached_risk_data}")
         except Exception as e:
             logger.error(f"❌ 更新风控数据失败: {e}")
-            exit()
+            raise e
 
 
     async def _check_engine_health(self):
