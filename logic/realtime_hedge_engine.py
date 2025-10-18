@@ -1133,7 +1133,7 @@ class RealtimeHedgeEngine:
 
 
     async def _update_exchange_info(self):
-        if self.exchange_combined_info_cache['update_time'] - time.time() > 10:
+        if self.exchange_combined_info_cache['update_time'] - time.time() > 3:
             logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 执行定时风控检查")
             risk_data, update_time = await self.update_exchange_info_helper()
             # 分发给所有引擎进程
