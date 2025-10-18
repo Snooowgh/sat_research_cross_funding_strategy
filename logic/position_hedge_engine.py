@@ -309,6 +309,7 @@ class PositionHedgeEngine:
 
                 logger.success(f"✅ 对冲订单成功: {target_exchange.exchange_code} {symbol} {side} {amount}")
                 logger.info(f"📊 对冲执行详情:")
+                logger.info(f"   数量: {amount}")
                 logger.info(f"   原始价格: {last_filled_price}")
                 logger.info(f"   对冲价格: {hedge_price}")
                 logger.info(f"   价差: {price_difference:.6f}")

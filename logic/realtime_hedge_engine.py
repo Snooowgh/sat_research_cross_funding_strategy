@@ -61,8 +61,8 @@ class TradeConfig:
     use_dynamic_amount: bool = True  # 是否根据订单簿动态调整下单数量
     max_first_level_ratio: float = 1  # 最大吃掉第一档流动性的比例（0.5 = 50%）
     no_trade_timeout_sec: float = 0  # 无交易自动关闭超时时间（秒，0表示禁用）
-    min_order_value_usd: float = 200.0  # 单笔最小订单金额（美元）
-    max_order_value_usd: float = 500.0  # 单笔最大订单金额（美元）
+    min_order_value_usd: float = 150.0  # 单笔最小订单金额（美元）
+    max_order_value_usd: float = 300.0  # 单笔最大订单金额（美元）
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
     trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
@@ -855,7 +855,7 @@ class RealtimeHedgeEngine:
     async def auto_force_reduce_position_to_safe(self):
         force_reduce_value = 0
         total_spread_profit = 0
-        while True:
+        while True and self._position1 and self._position2:
             risk_data = self._get_risk_data()
             if not risk_data.should_force_reduce():
                 break
@@ -928,7 +928,7 @@ class RealtimeHedgeEngine:
                 # LIMIT-TAKER模式：信号超时取消所有挂单
                 if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
                         self._last_limit_taker_signal and
-                        time.time() - self._last_limit_taker_signal > self.trade_config.limit_order_timeout_sec):
+                        time.time() - self._last_limit_taker_signal.trade_time > self.trade_config.limit_order_timeout_sec):
                     logger.info(f"🚫 {self.symbol} {self.exchange_pair} 挂单超时, 取消所有订单")
                     await self._cancel_all_orders()
                     self._last_limit_taker_signal = None
@@ -1049,6 +1049,7 @@ class RealtimeHedgeEngine:
             except Exception as e:
                 error_msg = (f"❌❌❌ {self.symbol} {self.exchange_pair} 交易进程结束, 错误内容: {e}\n"
                              f"错误详情:\n{traceback.format_exc()}")
+                logger.error(error_msg)
                 await async_notify_telegram(error_msg)
                 break
 
@@ -1079,16 +1080,10 @@ class RealtimeHedgeEngine:
             - 优先减仓
             - LIMIT-TAKER模式下有挂单时跳过平衡
         """
-        # LIMIT-TAKER模式下，如果存在最后信号说明可能有挂单，需要检查
+        # LIMIT-TAKER模式下，如果存在最后信号说明可能有挂单
         if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
             self._last_limit_taker_signal is not None):
-            # 检查两个交易所是否存在活跃挂单
-            has_orders1 = await self._has_active_orders(self.exchange1, self.trade_config.pair1)
-            has_orders2 = await self._has_active_orders(self.exchange2, self.trade_config.pair2)
-
-            if has_orders1 or has_orders2:
-                logger.info(f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER模式下存在活跃挂单，跳过仓位平衡")
-                return
+            return
 
         risk_data = self.exchange_combined_info_cache['risk_data']
         imbalance_value = risk_data.get_pos_imbalanced_value(self.symbol, self.exchange_code_list)
@@ -1134,7 +1129,6 @@ class RealtimeHedgeEngine:
                     f"金额超限, 需要手动执行减仓: {trade_amt} ${imbalance_value:.2f}")
         logger.warning(text)
         await async_notify_telegram(text)
-
 
     async def _update_exchange_info(self):
         if time.time() - self.exchange_combined_info_cache['update_time'] > 15:
