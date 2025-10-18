@@ -1123,7 +1123,7 @@ class RealtimeHedgeEngine:
         trade_amt = abs(imbalance_amt)
         logger.info(f"⚠️ {pair} ({use_exchange.exchange_code}) 仓位不均衡下单 {side} 数量 {trade_amt} 参考价格: {mid_price}"
                     f"不平衡数量: {imbalance_amt} ${imbalance_value:.4f}")
-        if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit:
+        if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit and trade_amt > 0:
             try:
                 await use_exchange.make_new_order(self.trade_config.pair1,
                                                 side,

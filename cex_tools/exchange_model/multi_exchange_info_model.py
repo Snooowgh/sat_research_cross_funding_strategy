@@ -263,14 +263,11 @@ class MultiExchangeCombinedInfoModel:
 
     def get_pos_imbalanced_value(self, symbol: str, exchange_codes: List[str] = None):
         positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
-        value = 0
+        refer_price = 0
         for pos in positions_list:
-            if pos is None:
-                amt = 0
-            else:
-                amt = pos.positionAmt
-                value += amt * pos.entryPrice
-        return value
+            if pos is not None:
+                refer_price = pos.entryPrice
+        return self.get_pos_imbalanced_amt(symbol, exchange_codes) * refer_price
 
     def get_pos_imbalanced_amt(self, symbol: str, exchange_codes: List[str] = None):
         positions_list = self.get_symbol_exchange_positions(symbol, exchange_codes)
