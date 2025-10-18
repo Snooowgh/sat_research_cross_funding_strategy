@@ -535,14 +535,6 @@ class MultiProcessArbitrageManager:
 
             logger.success(f"✅ PositionHedgeEngine 进程启动成功 (PID: {self.hedge_engine_process.pid})")
 
-            # 发送通知
-            await async_notify_telegram(
-                f"🎯 PositionHedgeEngine 已启动\n"
-                f"交易模式: {self.trade_mode}\n"
-                f"进程ID: {self.hedge_engine_process.pid}\n"
-                f"用于处理 limit_taker 模式的仓位对冲"
-            )
-
         except Exception as e:
             logger.error(f"❌ 启动 PositionHedgeEngine 进程失败: {e}")
             # 清理资源
@@ -556,7 +548,8 @@ class MultiProcessArbitrageManager:
 
         if len(available_exchanges) < 2:
             return None
-
+        elif len(available_exchanges) == 2:
+            return available_exchanges
         logger.info(f"🔍 为 {symbol} 分析最优交易所组合，候选交易所: {available_exchanges}")
 
         # 评分系统

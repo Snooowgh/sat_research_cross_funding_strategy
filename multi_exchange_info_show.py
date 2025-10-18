@@ -44,11 +44,10 @@ async def get_single_exchange_info_model(async_exchange) -> SingleExchangeInfoMo
 
     except Exception as e:
         logger.error(f"获取 {async_exchange.exchange_code} 交易所信息失败: {e}")
-        exchange_info.time_cost = time.time() - start
-        return exchange_info
+        raise e
 
 
-async def get_multi_exchange_info_combined_model(async_exchange_list, find_opportunities=True,
+async def get_multi_exchange_info_combined_model(async_exchange_list, find_opportunities=False,
                                                  opportunity_limit=5) -> MultiExchangeCombinedInfoModel:
     """
     获取多个交易所的综合信息模型
@@ -99,8 +98,7 @@ async def get_multi_exchange_info_combined_model(async_exchange_list, find_oppor
 
     except Exception as e:
         logger.error(f"获取多交易所综合信息失败: {e}")
-        combined_info.time_cost = time.time() - start_time
-        return combined_info
+        raise e
 
 
 async def search_funding_opportunities(combined_info, async_exchange_list, top_chance_limit=5):

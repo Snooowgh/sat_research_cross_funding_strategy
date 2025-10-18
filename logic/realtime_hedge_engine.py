@@ -1144,7 +1144,7 @@ class RealtimeHedgeEngine:
             self.exchange_combined_info_cache['risk_data'] = risk_data
             self.exchange_combined_info_cache['update_time'] = update_time
         else:
-            logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 使用风控缓存 ({time.time() - self.exchange_combined_info_cache['update_time']:.2f}s)")
+            # logger.debug(f"🔄 {self.symbol} {self.exchange_pair} 使用风控缓存 ({time.time() - self.exchange_combined_info_cache['update_time']:.2f}s)")
             risk_data = self.exchange_combined_info_cache['risk_data']
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
