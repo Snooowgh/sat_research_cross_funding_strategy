@@ -18,6 +18,14 @@ from utils.notify_tools import notify_telegram, CHANNEL_TYPE
 async def main():
     arbitrage_param = MultiExchangeArbitrageParam()
     await arbitrage_param.init_async_exchanges()
+
+    print(arbitrage_param.okx_exchange.okxSWAP.account.api.get_config())
+    await arbitrage_param.okx_exchange.make_new_order("BTC",
+                                                    "BUY",
+                                                    "LIMIT",
+                                                    0.001,
+                                                    105000,
+                                                  reduceOnly=True)
     # print(await arbitrage_param.binance_unified_exchange.make_new_order("BTC",
     #                                                               "BUY",
     #                                                               "LIMIT",
@@ -29,4 +37,4 @@ async def main():
     # print(await arbitrage_param.binance_unified_exchange.get_all_cur_positions())
 
 
-asyncio.run(main())
+# asyncio.run(main())

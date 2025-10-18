@@ -21,7 +21,7 @@ pytz
 hyperliquid-python-sdk
 pybit
 python-dotenv
-okx==2.1.1
+okx@git+https://github.com/Snooowgh/okx.git@master
 twilio
 psutil
 binance-sdk-derivatives-trading-portfolio-margin

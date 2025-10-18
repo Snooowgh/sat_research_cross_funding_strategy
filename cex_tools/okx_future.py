@@ -67,6 +67,11 @@ class OkxFuture:
         self.taker_fee_rate = kwargs.get("taker_fee_rate", 0.0005)
         self.parent_account = kwargs.get("parent_account")
         self.get_symbol_sheet_to_amt("BTCUSDT")
+        config = self.okxSWAP.account.api.get_config()["data"][0]
+        logger.info(f"Okx账户模式: {config['posMode']} 等级: {config['level']} 权限: {config['perm']}")
+        if config['posMode'] != "net_mode":
+            logger.info("设置Okx账户模式为net_mode")
+            self.okxSWAP.account.set_position_mode('net_mode')
 
     def set_leverage(self, symbol, default_leverage=None):
         symbol = self.convert_symbol(symbol)
@@ -279,7 +284,7 @@ class OkxFuture:
         if isinstance(data, list):
             data = data[0]
         if not data["ordId"]:
-            raise Exception(set_order_result["data"]["sMsg"])
+            raise Exception(data["sMsg"])
         return {"orderId": data["ordId"]}
         #
         # if order_type == "LIMIT":
