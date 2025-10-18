@@ -1038,8 +1038,8 @@ class RealtimeHedgeEngine:
                     continue
 
                 if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER
-                        and self._last_signal
-                        and self._last_signal.trade_time is not None\
+                        and self._last_signal is not None
+                        and self._last_signal.trade_time is not None
                         and (time.time() - self._last_signal.trade_time) < self.trade_config.make_limit_order_interval_limit_sec):
                     logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 下单频率限制..")
                     continue
