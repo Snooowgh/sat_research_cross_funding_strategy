@@ -1098,7 +1098,14 @@ class RealtimeHedgeEngine:
         else:
             # 做多
             side = TradeSide.BUY
-        use_exchange, other_exchange = (self.exchange1, self.exchange2) if self._position1.position_side != side else (self.exchange2, self.exchange1)
+        if self._position1:
+            pair =self._position1.pair
+            use_exchange, other_exchange = (self.exchange1, self.exchange2) if self._position1.position_side != side else (self.exchange2, self.exchange1)
+        elif self._position2:
+            pair = self._position2.pair
+            use_exchange, other_exchange = (self.exchange2, self.exchange1) if self._position2.position_side != side else (self.exchange1, self.exchange2)
+        else:
+            return
         mid_price = await use_exchange.get_tick_price(self.symbol)
         trade_amt = abs(imbalance_amt)
         if abs(imbalance_value) < self.risk_config.auto_pos_balance_usd_value_limit:
@@ -1108,19 +1115,19 @@ class RealtimeHedgeEngine:
                                                 order_type="MARKET",
                                                 amount=trade_amt,
                                                 price=mid_price, reduceOnly=True)
-                text = (f"⚠️ {self._position1.pair}({use_exchange.exchange_code}) {side} "
+                text = (f"⚠️ {pair}({use_exchange.exchange_code}) {side} "
                         f"自动平衡仓位, 减仓:  {imbalance_amt} ${imbalance_value:.4f}")
             except Exception as e:
                 await other_exchange.make_new_order(self.trade_config.pair2,
                                               side,
                                               order_type="MARKET",
                                               quantity=trade_amt, price=mid_price)
-                text = (f"⚠️⚠️ {self.trade_config.pair2}({other_exchange.exchange_code}), "
+                text = (f"⚠️⚠️ {pair}({other_exchange.exchange_code}), "
                         f"自动执行加仓: {imbalance_amt} ${imbalance_value:.4f} "
                         f"| ❌{use_exchange.exchange_code}减仓交易异常:{e}")
                 self._running = False
         else:
-            text = (f"❌ {self._position1.pair}({use_exchange.exchange_code}), "
+            text = (f"❌ {pair}({use_exchange.exchange_code}), "
                     f"金额超限, 需要手动执行减仓: {trade_amt} ${imbalance_value:.2f}")
         logger.warning(text)
         await async_notify_telegram(text)
