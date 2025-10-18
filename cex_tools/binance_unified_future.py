@@ -214,6 +214,7 @@ class BinanceUnifiedFuture:
                 time_in_force="GTC"
             else:
                 time_in_force = None
+                price = None
 
             # 止损单需要stopPrice
             if "stopPrice" in kwargs and kwargs["stopPrice"] is not None:

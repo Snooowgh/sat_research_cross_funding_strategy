@@ -275,7 +275,12 @@ class OkxFuture:
         if msg:
             send_slack_message(content + "\n" + msg)
         logger.debug(set_order_result)
-        return {"orderId": set_order_result["data"]["ordId"]}
+        data = set_order_result["data"]
+        if isinstance(data, list):
+            data = data[0]
+        if not data["ordId"]:
+            raise Exception(set_order_result["data"]["sMsg"])
+        return {"orderId": data["ordId"]}
         #
         # if order_type == "LIMIT":
         #     price = self.convert_price(symbol, price)

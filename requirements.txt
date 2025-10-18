@@ -24,3 +24,4 @@ python-dotenv
 okx==2.1.1
 twilio
 psutil
+binance-sdk-derivatives-trading-portfolio-margin
