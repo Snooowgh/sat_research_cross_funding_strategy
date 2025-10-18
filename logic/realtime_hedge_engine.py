@@ -616,7 +616,7 @@ class RealtimeHedgeEngine:
                 if ma_spread != 0:
                     current_mid_diff = (self._latest_orderbook1.mid_price - self._latest_orderbook2.mid_price) / self._latest_orderbook2.mid_price
                     deviation_ratio = abs(current_mid_diff - ma_spread) / abs(ma_spread) if ma_spread != 0 else 0
-                    if deviation_ratio > 3.0:  # 价差偏离历史均值超过3倍
+                    if deviation_ratio > 10.0:  # 价差偏离历史均值超过3倍
                         return False, f"价差异常:{current_mid_diff:.4%} (偏离历史均值{deviation_ratio:.1f}倍)，市场可能不稳定"
 
             except Exception as e:
@@ -752,7 +752,7 @@ class RealtimeHedgeEngine:
         # 更新最后信号时间
         signal.trade_time = time.time()
         self._last_limit_taker_signal = signal
-
+        self._last_trade_time = signal.trade_time
         limit_msg = (f"🎯 {self.symbol} {self.exchange_pair} LIMIT-TAKER限价单已挂: "
                     f"订单1: N/A 订单2: {order2.get('orderId', 'N/A')} "
                     f"数量: {amount:.4f} 信号: {signal.spread_rate:.4%}")
@@ -1015,7 +1015,12 @@ class RealtimeHedgeEngine:
                         await asyncio.sleep(0.3)
 
                     continue
-
+                else:
+                    # 信号有效
+                    if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER
+                            and self._last_limit_taker_signal is not None):
+                        # 挂单仍然存在 不再重复挂单
+                        continue
                 # 找到满足条件的机会！动态计算交易数量
                 trade_amount = await self._calculate_trade_amount(signal)
 
@@ -1034,11 +1039,6 @@ class RealtimeHedgeEngine:
                 if trade_amount <= 0:
                     logger.warning("计算的交易数量为0，跳过本次交易")
                     await asyncio.sleep(0.05)
-                    continue
-                # 信号有效
-                if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER
-                        and self._last_limit_taker_signal is not None):
-                    # 挂单仍然存在 不再重复挂单
                     continue
                 # 执行交易
                 await self._execute_trade(signal, trade_amount)
@@ -1143,7 +1143,10 @@ class RealtimeHedgeEngine:
             risk_data = self.exchange_combined_info_cache['risk_data']
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
-        if self._position1 or self._position2:
+        if ((self._position1 or self._position2) and
+                (self.exchange_combined_info_cache['update_time'] - self._last_trade_time > 60
+                and self._last_limit_taker_signal is None)):
+            # 10秒内无交易 才执行平衡检查
             await self._auto_balance_position()
 
     async def stop(self):

@@ -278,9 +278,25 @@ class PositionHedgeEngine:
             # 计算订单执行延迟
             hedge_end_time = time.time()
             delay_ms = (hedge_end_time - hedge_start_time) * 1000
+        except Exception as e:
+            self.stats['failed_hedges'] += 1
+            logger.error(f"❌ 执行对冲订单异常: {target_exchange.exchange_code} {symbol} {side} {amount} - {e}")
+            logger.exception(e)
 
-            if order_result:
-                orderId = order_result["orderId"]
+            # 发送错误通知
+            await async_notify_telegram(
+                f"⚠️ 对冲订单执行失败\n"
+                f"交易所: {target_exchange.exchange_code}\n"
+                f"交易对: {symbol}\n"
+                f"方向: {side}\n"
+                f"数量: {amount}\n"
+                f"错误: {str(e)}"
+            )
+            return None
+
+        if order_result:
+            orderId = order_result["orderId"]
+            try:
                 order_info = await target_exchange.get_recent_order(symbol, orderId)
                 self.stats['successful_hedges'] += 1
                 self.stats['total_hedge_volume'] += amount
@@ -316,28 +332,15 @@ class PositionHedgeEngine:
                 logger.info(f"   滑点: {slippage:.6f}")
                 logger.info(f"   延迟: {delay_ms:.2f}ms")
                 logger.info(f"   收益: {profit_usd:.6f} USD ({'盈利' if is_profitable else '亏损'})")
+            except Exception as e:
+                logger.warning(f"{target_exchange.exchange_code} 计算对冲单收益率失败: {e}")
 
-                return order_result
-            else:
-                self.stats['failed_hedges'] += 1
-                logger.error(f"❌ 对冲订单失败: {target_exchange.exchange_code} {symbol} {side} {amount}")
-                return None
-
-        except Exception as e:
+            return order_result
+        else:
             self.stats['failed_hedges'] += 1
-            logger.error(f"❌ 执行对冲订单异常: {target_exchange.exchange_code} {symbol} {side} {amount} - {e}")
-            logger.exception(e)
-
-            # 发送错误通知
-            await async_notify_telegram(
-                f"⚠️ 对冲订单执行失败\n"
-                f"交易所: {target_exchange.exchange_code}\n"
-                f"交易对: {symbol}\n"
-                f"方向: {side}\n"
-                f"数量: {amount}\n"
-                f"错误: {str(e)}"
-            )
+            logger.error(f"❌ 对冲订单失败: {target_exchange.exchange_code} {symbol} {side} {amount}")
             return None
+
 
     def _calculate_price_difference(self, original_price: float, hedge_price: float,
                                     original_side: str, hedge_side: str) -> float:
