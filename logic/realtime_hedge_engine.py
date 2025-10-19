@@ -66,8 +66,7 @@ class TradeConfig:
     daemon_mode: bool = False  # 是否持续运行 (no_trade_timeout_sec>0 如果有交易 则不再超时)
     zscore_threshold: float = env_config.get_float("RH_DEFAULT_ZSCORE_THRESHOLD", 2.0)
     trade_mode: TradeMode = TradeMode(env_config.get_str("RH_DEFAULT_TRADE_MODE", "taker_taker"))  # 交易模式
-    make_limit_order_interval_limit_sec: float = 10  # 创建限价单的间隔时间限制（秒）
-    limit_order_timeout_sec: float = 1
+    limit_order_timeout_sec: float = 3
 
 
 @dataclass
@@ -187,7 +186,7 @@ class RealtimeHedgeEngine:
         # 使用异步方法获取市场信息，增加三次重试机制
         max_retries = 3
         base_delay = 1.0  # 基础延迟时间（秒）
-
+        spread_stats = None
         for attempt in range(max_retries):
             try:
                 spread_stats = await self.spread_analyzer.analyze_spread(symbol=self.symbol,
@@ -927,6 +926,8 @@ class RealtimeHedgeEngine:
         logger.info(f"{self.symbol} {self.exchange_pair} 启动交易...")
         await self._update_exchange_info()
         logger.info(f"当前持仓: {self._position1} / {self._position2}")
+        if not self._can_add_position():
+            logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 账户无法加仓")
         # 如果启用了超时，记录超时配置
         if self._timeout_enabled:
             logger.info(f"⏱️ {self.symbol} {self.exchange_pair}超时: {self.trade_config.no_trade_timeout_sec}秒")
@@ -942,7 +943,7 @@ class RealtimeHedgeEngine:
 
                 # LIMIT-TAKER模式：信号超时取消所有挂单
                 if (self.trade_config.trade_mode == TradeMode.LIMIT_TAKER and
-                        self._last_limit_taker_signal and
+                        self._last_limit_taker_signal is not None and
                         time.time() - self._last_limit_taker_signal.trade_time > self.trade_config.limit_order_timeout_sec):
                     logger.info(f"🚫 {self.symbol} {self.exchange_pair} 挂单超时, 取消所有订单")
                     await self._cancel_all_orders()
@@ -1108,9 +1109,11 @@ class RealtimeHedgeEngine:
         if imbalance_amt > 0:
             # 做空
             side = TradeSide.SELL
-        else:
+        elif imbalance_amt < 0:
             # 做多
             side = TradeSide.BUY
+        else:
+            return
         if self._position1:
             pair =self._position1.pair
             use_exchange, other_exchange = (self.exchange1, self.exchange2) if self._position1.position_side != side else (self.exchange2, self.exchange1)

@@ -189,6 +189,9 @@ class MultiExchangeCombinedInfoModel:
         # 合并后的仓位信息
         self.merged_positions = []
 
+        # 位置字典映射：Dict[exchange_code][symbol] = position
+        self.position_dict = {}
+
         # 费率套利机会
         self.funding_opportunities = []
 
@@ -232,33 +235,42 @@ class MultiExchangeCombinedInfoModel:
                 return exchange_info
         return None
 
+    def build_position_dict(self):
+        """构建交易所到符号的位置映射字典：Dict[exchange_code][symbol] = position"""
+        self.position_dict = {}
+        for exchange_info in self.exchange_infos:
+            self.position_dict[exchange_info.exchange_code] = {}
+            for pos in exchange_info.positions:
+                self.position_dict[exchange_info.exchange_code][pos.symbol] = pos
+
     def get_symbol_exchange_positions(self, symbol: str, exchange_codes: List[str] = None) -> list:
         """
         获取指定交易对和交易所的所有仓位
         Args:
             symbol: 交易对符号（如 "BTC" 或 "BTCUSDT"）
-            exchange_codes:
+            exchange_codes: 指定交易所代码列表，None表示所有交易所
         Returns:
-            list: 仓位对象列表
+            list: 仓位对象列表，如果指定交易所代码但没有仓位则返回None
         """
+        # 确保position_dict已构建
+        if not self.position_dict:
+            self.build_position_dict()
+
         positions = []
+
         if exchange_codes is None:
-            for exchange_info in self.exchange_infos:
-                for pos in exchange_info.positions:
-                    if pos.symbol == symbol:
-                        positions.append(pos)
+            # 查询所有交易所
+            for exchange_code, symbol_positions in self.position_dict.items():
+                if symbol in symbol_positions:
+                    positions.append(symbol_positions[symbol])
         else:
-            # and (exchange_codes is None or pos.exchange_code in exchange_codes)
+            # 查询指定交易所
             for exchange_code in exchange_codes:
-                for exchange_info in self.exchange_infos:
-                    if exchange_info.exchange_code == exchange_code:
-                        has_pos = False
-                        for pos in exchange_info.positions:
-                            if pos.symbol == symbol:
-                                positions.append(pos)
-                                has_pos = True
-                        if not has_pos:
-                            positions.append(None)
+                if exchange_code in self.position_dict and symbol in self.position_dict[exchange_code]:
+                    positions.append(self.position_dict[exchange_code][symbol])
+                else:
+                    positions.append(None)
+
         return positions
 
     def get_pos_imbalanced_value(self, symbol: str, exchange_codes: List[str] = None):
@@ -341,6 +353,9 @@ class MultiExchangeCombinedInfoModel:
         self.total_unrealized_pnl = sum(ex_info.total_unrealized_pnl for ex_info in self.exchange_infos)
         self.total_funding_fee = sum(ex_info.total_funding_fee for ex_info in self.exchange_infos)
         self.total_notional = sum(ex_info.total_notional for ex_info in self.exchange_infos)
+
+        # 更新位置字典映射
+        self.build_position_dict()
 
     def should_notify_risk(self):
         """是否需要风险预警"""
