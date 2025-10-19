@@ -66,7 +66,7 @@ async def get_multi_exchange_info_combined_model(async_exchange_list, find_oppor
     try:
         # 并行获取各个交易所的信息
         tasks = [get_single_exchange_info_model(exchange) for exchange in async_exchange_list]
-        exchange_infos = await asyncio.gather(*tasks, return_exceptions=True)
+        exchange_infos = await asyncio.gather(*tasks)
 
         # 过滤出成功获取的信息
         successful_exchange_infos = []
