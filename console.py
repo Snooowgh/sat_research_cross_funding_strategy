@@ -43,4 +43,4 @@ async def main():
     # print(await arbitrage_param.binance_unified_exchange.get_all_cur_positions())
 
 
-# asyncio.run(main())
+asyncio.run(main())
