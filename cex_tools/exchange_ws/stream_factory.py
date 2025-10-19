@@ -78,7 +78,7 @@ class StreamFactory:
             StreamFactory.create_orderbook_stream(exchange_code2, symbol)
         ]
 
-        streams = await asyncio.gather(*tasks, return_exceptions=True)
+        streams = await asyncio.gather(*tasks)
 
         stream1 = streams[0] if not isinstance(streams[0], Exception) else None
         stream2 = streams[1] if not isinstance(streams[1], Exception) else None
@@ -104,7 +104,7 @@ class StreamFactory:
                     start_tasks.append(None)
 
             # 等待所有启动完成
-            await asyncio.gather(*[task for task in start_tasks if task], return_exceptions=True)
+            await asyncio.gather(*[task for task in start_tasks if task])
 
             for i, (stream, result) in enumerate(zip(streams, [r for r in start_tasks if r])):
                 if stream:
@@ -130,7 +130,7 @@ class StreamFactory:
                     stop_tasks.append(None)
 
             # 等待所有停止完成
-            await asyncio.gather(*[task for task in stop_tasks if task], return_exceptions=True)
+            await asyncio.gather(*[task for task in stop_tasks if task])
 
             for i, (stream, result) in enumerate(zip(streams, [r for r in stop_tasks if r])):
                 if stream:

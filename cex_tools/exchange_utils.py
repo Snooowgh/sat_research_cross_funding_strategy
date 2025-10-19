@@ -45,7 +45,7 @@ class ExchangeUtils:
             for exchange in exchanges:
                 tasks.append(exchange.get_tick_price(symbol))
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks)
 
             for i, result in enumerate(results):
                 exchange_code = exchanges[i].exchange_code
@@ -126,7 +126,7 @@ class ExchangeUtils:
             for exchange in exchanges:
                 tasks.append(exchange.get_funding_rate(symbol, apy=apy))
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks)
 
             for i, result in enumerate(results):
                 exchange_code = exchanges[i].exchange_code

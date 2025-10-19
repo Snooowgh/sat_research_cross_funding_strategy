@@ -170,7 +170,7 @@ class PositionStreamManager:
                 start_tasks.append(task)
 
             # 等待所有启动任务完成
-            results = await asyncio.gather(*start_tasks, return_exceptions=True)
+            results = await asyncio.gather(*start_tasks)
 
             # 检查启动结果
             success_count = 0
@@ -219,7 +219,7 @@ class PositionStreamManager:
             stop_tasks.append(task)
 
         # 等待所有停止任务完成
-        await asyncio.gather(*stop_tasks, return_exceptions=True)
+        await asyncio.gather(*stop_tasks)
 
         self.streams.clear()
         self.is_running = False

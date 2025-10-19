@@ -330,7 +330,7 @@ class RealtimeHedgeEngine:
         # cancel_tasks = [cancel_task1, cancel_task2]
         #
         # # 等待所有取消操作完成
-        # await asyncio.gather(*cancel_tasks, return_exceptions=True)
+        # await asyncio.gather(*cancel_tasks)
 
     async def _calculate_spread_by_daemon(self) -> Optional[TradeSignal]:
         """
@@ -1187,7 +1187,7 @@ class RealtimeHedgeEngine:
             try:
                 # 给WebSocket流停止最多3秒时间
                 await asyncio.wait_for(
-                    asyncio.gather(*stop_tasks, return_exceptions=True),
+                    asyncio.gather(*stop_tasks),
                     timeout=3.0
                 )
             except asyncio.TimeoutError:
