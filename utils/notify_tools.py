@@ -510,6 +510,7 @@ def notify_telegram(content="", image_urls=None, debug=False, channel_type=CHANN
                     )
             return True if result else False
         except Exception as e:
+            logger.warning(f"发送Telegram消息失败: {e}")
             return False
 
     if channel_type in [CHANNEL_TYPE.QUIET, CHANNEL_TYPE.CEX_QUIET]:
@@ -540,13 +541,13 @@ async def async_notify_telegram(content="", image_urls=None, debug=False, channe
 
         async def send_msg(msg):
             ret = None
-            for chat_id in chat_ids.split(","):
-                return await bot.send_message(
-                    chat_id=chat_id,
-                    text=msg,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=disable_web_page_preview,
-                    disable_notification=disable_notification
+            for _chat_id in chat_ids.split(","):
+                ret = await bot.send_message(
+                        chat_id=_chat_id,
+                        text=msg,
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=disable_web_page_preview,
+                        disable_notification=disable_notification
                 )
             return ret
 
@@ -576,18 +577,19 @@ async def async_notify_telegram(content="", image_urls=None, debug=False, channe
                     )
             return True if result else False
         except Exception as e:
+            logger.warning(f"发送Telegram消息失败: {e}")
             return False
 
     if channel_type in [CHANNEL_TYPE.QUIET, CHANNEL_TYPE.CEX_QUIET]:
         # sat_research_bot (quiet) 静音频道
-        token = env_config.get("TELEGRAM_BOT_TOKEN_LOG")
+        token = env_config.get_str("TELEGRAM_BOT_TOKEN_LOG")
     else:
         # sat_research_alert_bot
-        token = env_config.get("TELEGRAM_BOT_TOKEN_ALERT")
+        token = env_config.get_str("TELEGRAM_BOT_TOKEN_ALERT")
     await send_telegram_notification(content, token)
 
 
-def test_phone_notifications():
+def run_phone_notifications():
     """
     测试电话通知功能
     """
@@ -620,9 +622,10 @@ def test_phone_notifications():
 
 if __name__ == '__main__':
     # 原有测试
-    asyncio.run(async_notify_telegram("Test1"))
-    asyncio.run(async_notify_telegram("Test1", channel_type=CHANNEL_TYPE.QUIET))
-    notify_telegram("Test2")
+    asyncio.run(async_notify_telegram("Test1123123", channel_type=CHANNEL_TYPE.TRADE,chat_ids="1237945663,1009361554"))
+    # notify_telegram("Test1123123", channel_type=CHANNEL_TYPE.TRADE,chat_ids="1237945663,1009361554")
+    # asyncio.run(async_notify_telegram("Test1", channel_type=CHANNEL_TYPE.QUIET))
+    # notify_telegram("Test2")
 
     # 新增电话通知测试（需要先配置正确的Twilio参数）
     # test_phone_notifications()
