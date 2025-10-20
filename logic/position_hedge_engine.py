@@ -6,11 +6,11 @@
 @Description : 仓位对冲引擎，监听两个交易所的订单更新，自动执行对冲交易
 @Time        : 2025/10/16
 """
+import asyncio
 import time
 from typing import Dict, Optional, Callable, Set
 from loguru import logger
 from dataclasses import dataclass
-
 from cex_tools.exchange_model.order_update_event_model import OrderUpdateEvent, OrderStatusType, OrderType
 from cex_tools.async_exchange_adapter import AsyncExchangeAdapter
 from utils.notify_tools import async_notify_telegram
@@ -20,7 +20,7 @@ from utils.notify_tools import async_notify_telegram
 class HedgeConfig:
     """对冲配置"""
     # 最小对冲金额
-    min_hedge_value_usd: float = 50
+    min_hedge_value_usd: float = 15
 
 
 class PositionHedgeEngine:
@@ -34,8 +34,8 @@ class PositionHedgeEngine:
     def __init__(self,
                  exchange1: AsyncExchangeAdapter,
                  exchange2: AsyncExchangeAdapter,
-                 stream1: any,  # position stream for exchange1
-                 stream2: any,  # position stream for exchange2
+                 stream1,  # position stream for exchange1
+                 stream2,  # position stream for exchange2
                  config: HedgeConfig):
         """
         初始化对冲引擎
@@ -80,6 +80,15 @@ class PositionHedgeEngine:
 
         logger.info(f"🚀 初始化仓位对冲引擎: {self.exchange1_code} <-> {self.exchange2_code}")
         logger.info(f"📋 配置信息: {config}")
+
+    def _get_default_hedge_value(self, symbol):
+        """获取默认对冲金额"""
+        default_map = {
+            "BTC": 120,
+            "ETH": 25,
+            "AAVE": 25,
+        }
+        return default_map.get(symbol, self.config.min_hedge_value_usd)
 
     def _get_order_key(self, event: OrderUpdateEvent) -> str:
         """生成订单唯一标识"""
@@ -171,12 +180,13 @@ class PositionHedgeEngine:
         logger.info(f"   数量: +{quantity:.6f} (累计: {pending['total_amount']:.6f})")
         logger.info(f"   价值: +{order_value:.2f} USD (累计: {pending['total_value']:.2f} USD)")
 
+        default_hedge_value = self._get_default_hedge_value(symbol)
         # 检查是否达到最小对冲金额
-        if pending['total_value'] >= self.config.min_hedge_value_usd:
+        if pending['total_value'] >= default_hedge_value:
             logger.info(f"✅ 达到最小对冲金额，执行批量对冲")
             await self._execute_pending_hedge(pending_key)
         else:
-            logger.info(f"⏳ 金额不足，继续累计 (还需: {self.config.min_hedge_value_usd - pending['total_value']:.2f} USD)")
+            logger.info(f"⏳ 金额不足，继续累计 (还需: {default_hedge_value - pending['total_value']:.2f} USD)")
 
     async def _execute_pending_hedge(self, pending_key: str):
         """
@@ -292,55 +302,68 @@ class PositionHedgeEngine:
                 f"数量: {amount}\n"
                 f"错误: {str(e)}"
             )
-            return None
+            return
 
         if order_result:
-            orderId = order_result["orderId"]
-            try:
-                order_info = await target_exchange.get_recent_order(symbol, orderId)
-                self.stats['successful_hedges'] += 1
-                self.stats['total_hedge_volume'] += amount
-
-                # 从订单结果中提取实际成交价格
-                hedge_price = order_info.avgPrice
-
-                # 计算价差和收益率
-                price_difference = self._calculate_price_difference(
-                    last_filled_price, hedge_price, event.side, side
-                )
-
-                # 计算滑点
-                slippage = self._calculate_slippage(
-                    last_filled_price, hedge_price, event.side, side
-                )
-
-                # 计算收益/亏损
-                profit_usd = price_difference * amount
-                is_profitable = profit_usd > 0
-
-                # 更新统计数据
-                self._update_hedge_stats(
-                    price_difference, slippage, delay_ms, is_profitable
-                )
-
-                logger.success(f"✅ 对冲订单成功: {target_exchange.exchange_code} {symbol} {side} {amount}")
-                logger.info(f"📊 对冲执行详情:")
-                logger.info(f"   数量: {amount}")
-                logger.info(f"   原始价格: {last_filled_price}")
-                logger.info(f"   对冲价格: {hedge_price}")
-                logger.info(f"   价差: {price_difference:.6f}")
-                logger.info(f"   滑点: {slippage:.6f}")
-                logger.info(f"   延迟: {delay_ms:.2f}ms")
-                logger.info(f"   收益: {profit_usd:.6f} USD ({'盈利' if is_profitable else '亏损'})")
-            except Exception as e:
-                logger.warning(f"{target_exchange.exchange_code} 计算对冲单收益率失败: {e}")
-
-            return order_result
+            asyncio.create_task(self._update_order_execute_result(amount, delay_ms, event,
+                                                                 last_filled_price, order_result, side,
+                                                                    symbol, target_exchange))
         else:
             self.stats['failed_hedges'] += 1
             logger.error(f"❌ 对冲订单失败: {target_exchange.exchange_code} {symbol} {side} {amount}")
-            return None
 
+    async def _update_order_execute_result(self, amount: float, delay_ms: float, event, last_filled_price: float,
+                                          order_result: dict, side: str, symbol: str,
+                                          target_exchange: AsyncExchangeAdapter):
+        orderId = order_result["orderId"]
+        try:
+            order_info = None
+            max_retry_count = 10
+            while order_info is None and max_retry_count > 0:
+                try:
+                    order_info = await target_exchange.get_recent_order(symbol, orderId)
+                    if order_info is None:
+                        time.sleep(1)
+                        max_retry_count -= 1
+                except Exception as e:
+                    raise e
+            self.stats['successful_hedges'] += 1
+            self.stats['total_hedge_volume'] += amount
+            if not order_info:
+                raise Exception(f"获取{target_exchange.exchange_code}订单 {orderId} 失败")
+            # 从订单结果中提取实际成交价格
+            hedge_price = order_info.avgPrice
+
+            # 计算价差和收益率
+            price_difference = self._calculate_price_difference(
+                last_filled_price, hedge_price, event.side, side
+            )
+
+            # 计算滑点
+            slippage = self._calculate_slippage(
+                last_filled_price, hedge_price, event.side, side
+            )
+
+            # 计算收益/亏损
+            profit_usd = price_difference * amount
+            is_profitable = profit_usd > 0
+
+            # 更新统计数据
+            self._update_hedge_stats(
+                price_difference, slippage, delay_ms, is_profitable
+            )
+
+            logger.success(f"✅ 对冲订单结果: {target_exchange.exchange_code} {symbol} {side} {amount}")
+            logger.info(f"📊 对冲执行详情:")
+            logger.info(f"   数量: {amount}")
+            logger.info(f"   原始价格: {last_filled_price}")
+            logger.info(f"   对冲价格: {hedge_price}")
+            logger.info(f"   价差: {price_difference:.4f}")
+            logger.info(f"   滑点: {slippage:.4f}")
+            logger.info(f"   延迟: {delay_ms:.2f}ms")
+            logger.info(f"   收益: {profit_usd:.2f} USD ({'盈利' if is_profitable else '亏损'})")
+        except Exception as e:
+            logger.warning(f"{target_exchange.exchange_code} 计算对冲单收益率失败: {e}")
 
     def _calculate_price_difference(self, original_price: float, hedge_price: float,
                                     original_side: str, hedge_side: str) -> float:
@@ -475,7 +498,7 @@ class PositionHedgeEngine:
                 logger.info(f"   订单价值: {current_order_value:.2f} USD")
 
                 # 检查订单价值
-                if current_order_value >= self.config.min_hedge_value_usd:
+                if current_order_value >= self._get_default_hedge_value(event.symbol):
                     # 订单价值足够，直接执行对冲
                     logger.info(f"💰 订单价值达到最小要求，直接执行对冲")
                     try:
@@ -600,8 +623,8 @@ class PositionHedgeEngine:
                 'total_value': pending['total_value'],
                 'avg_price': pending['avg_price'],
                 'order_count': len(pending['orders']),
-                'min_value_needed': max(0, self.config.min_hedge_value_usd - pending['total_value']),
-                'ready_to_execute': pending['total_value'] >= self.config.min_hedge_value_usd
+                'min_value_needed': max(0, self._get_default_hedge_value(pending["symbol"]) - pending['total_value']),
+                'ready_to_execute': pending['total_value'] >= self._get_default_hedge_value(pending["symbol"])
             }
         return status
 
@@ -636,8 +659,8 @@ class PositionHedgeEngine:
 
 def create_hedge_engine(exchange1: AsyncExchangeAdapter,
                         exchange2: AsyncExchangeAdapter,
-                        stream1: any,
-                        stream2: any) -> PositionHedgeEngine:
+                        stream1,
+                        stream2) -> PositionHedgeEngine:
     """
     创建仓位对冲引擎的便捷函数
 
@@ -646,8 +669,6 @@ def create_hedge_engine(exchange1: AsyncExchangeAdapter,
         exchange2: 交易所2异步对象
         stream1: 交易所1的position stream
         stream2: 交易所2的position stream
-        symbol_mapping: 交易对映射字典
-        **config_kwargs: 其他配置参数
 
     Returns:
         PositionHedgeEngine: 对冲引擎实例

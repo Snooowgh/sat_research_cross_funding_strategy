@@ -1154,16 +1154,27 @@ class RealtimeHedgeEngine:
         await async_notify_telegram(text)
 
     async def _update_exchange_info(self, cache_refresh_delay=15):
-        if time.time() - self.exchange_combined_info_cache['update_time'] > cache_refresh_delay:
-            logger.debug(f"🔄 {self.exchange_combined_info_cache['updater']} 风控更新超时 "
-                         f"{self.symbol} {self.exchange_pair} 执行定时风控更新")
-            risk_data, update_time = await self.update_exchange_info_helper()
-            # 分发给所有引擎进程
-            self.exchange_combined_info_cache['risk_data'] = risk_data
-            self.exchange_combined_info_cache['update_time'] = update_time
-            self.exchange_combined_info_cache['updater'] = f"{self.symbol}-{self.exchange_pair}"
-        else:
-            risk_data = self.exchange_combined_info_cache['risk_data']
+        # 有最新数据 才能执行交易检查等工作
+        risk_data = None
+        retry_cnt = 3
+        while retry_cnt > 0:
+            try:
+                if time.time() - self.exchange_combined_info_cache['update_time'] > cache_refresh_delay:
+                    logger.debug(f"🔄 {self.exchange_combined_info_cache['updater']} 风控更新超时 "
+                                 f"{self.symbol} {self.exchange_pair} 执行定时风控更新")
+                    risk_data, update_time = await self.update_exchange_info_helper()
+                    # 分发给所有引擎进程
+                    self.exchange_combined_info_cache['risk_data'] = risk_data
+                    self.exchange_combined_info_cache['update_time'] = update_time
+                    self.exchange_combined_info_cache['updater'] = f"{self.symbol}-{self.exchange_pair}"
+                else:
+                    risk_data = self.exchange_combined_info_cache['risk_data']
+            except Exception as e:
+                logger.error(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败: {e}, 等待重试 {retry_cnt}..")
+                retry_cnt -= 1
+                await asyncio.sleep(3)
+        if not risk_data:
+            raise Exception(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败..")
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
                                                                 self.exchange_code_list)
         if ((self._position1 or self._position2) and

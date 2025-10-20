@@ -25,6 +25,8 @@ class ArbitrageWhiteListParam:
         # "ETH",
         # "SOL",
         # "PUMP",
+        "OM",
+        "UMA",
         "YB",
         "SOON",
         # "XPL",

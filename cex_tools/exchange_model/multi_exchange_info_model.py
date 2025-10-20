@@ -21,8 +21,8 @@ class SingleExchangeInfoModel:
         self.taker_fee_rate = 0
         self.maker_fee_rate = 0
 
-        self.default_safe_leverage = 0.5
-        # self.default_safe_leverage = 6
+        # self.default_safe_leverage = 1
+        self.default_safe_leverage = 6
         self.default_safe_maintenance_margin_ratio = 0.7
         self.default_safe_cross_margin_usage = 0.7
 
