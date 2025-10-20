@@ -1169,6 +1169,7 @@ class RealtimeHedgeEngine:
                     self.exchange_combined_info_cache['updater'] = f"{self.symbol}-{self.exchange_pair}"
                 else:
                     risk_data = self.exchange_combined_info_cache['risk_data']
+                break
             except Exception as e:
                 logger.error(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败: {e}, 等待重试 {retry_cnt}..")
                 retry_cnt -= 1
