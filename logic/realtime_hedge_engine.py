@@ -1157,7 +1157,7 @@ class RealtimeHedgeEngine:
     async def _update_exchange_info(self, cache_refresh_delay=15):
         # 有最新数据 才能执行交易检查等工作
         risk_data = None
-        retry_cnt = 3
+        retry_cnt = 5
         while retry_cnt > 0:
             try:
                 if time.time() - self.exchange_combined_info_cache['update_time'] > cache_refresh_delay:
@@ -1174,7 +1174,7 @@ class RealtimeHedgeEngine:
             except Exception as e:
                 logger.error(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败: {e}, 等待重试 {retry_cnt}..")
                 retry_cnt -= 1
-                await asyncio.sleep(3)
+                await asyncio.sleep((3 - retry_cnt) * 3)
         if not risk_data:
             raise Exception(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败..")
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,
