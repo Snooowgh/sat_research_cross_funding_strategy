@@ -1068,10 +1068,11 @@ class RealtimeHedgeEngine:
                 logger.error(error_msg)
                 await async_notify_telegram(error_msg)
                 break
-
+        await self._cancel_all_orders()
         logger.info(
             f"🏁 交易进程结束: 执行 {self._trade_count} 笔，累计 ${self._cum_volume:.2f}，收益 ${self._cum_profit:.2f}")
         await self._update_exchange_info()
+        await self._auto_balance_position()
 
     async def _has_active_orders(self, exchange, pair: str) -> bool:
         """

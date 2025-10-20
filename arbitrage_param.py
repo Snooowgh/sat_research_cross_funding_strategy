@@ -25,6 +25,13 @@ class ArbitrageWhiteListParam:
         # "ETH",
         # "SOL",
         # "PUMP",
+        "ACT",
+        "LPT",
+        "JTO",
+        "MAGIC",
+        "LAYER",
+        "TAO",
+
         "OM",
         "UMA",
         "YB",

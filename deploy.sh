@@ -2,6 +2,7 @@
 git add . && git commit -m "deploy" || echo "代码已提交"
 #git pull --no-edit
 git push origin master
+# 本地机器部署
 git push prod_server master
 # 生产部署
 # git push satresearch master
