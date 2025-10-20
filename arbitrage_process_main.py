@@ -1329,6 +1329,7 @@ if __name__ == "__main__":
     )
 
     # 运行主程序
+    logger.info(f"⚖️ 当前配置杠杆率为: {env_config.get_float('DEFAULT_SAFE_LEVERAGE', 1)}倍")
     asyncio.run(main())
     # while True:
     #     logger.info("....")

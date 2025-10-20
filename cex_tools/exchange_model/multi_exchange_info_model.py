@@ -8,6 +8,7 @@
 """
 from typing import List
 
+from config.env_config import env_config
 from utils.time_utils import get_datetime_now_str
 from utils.notify_img_generator import NotifyImgGenerator
 
@@ -21,8 +22,8 @@ class SingleExchangeInfoModel:
         self.taker_fee_rate = 0
         self.maker_fee_rate = 0
 
-        # self.default_safe_leverage = 1
-        self.default_safe_leverage = 4
+        self.default_safe_leverage = env_config.get_float("DEFAULT_SAFE_LEVERAGE", 1)
+        # self.default_safe_leverage = 4
         self.default_safe_maintenance_margin_ratio = 0.7
         self.default_safe_cross_margin_usage = 0.7
 
