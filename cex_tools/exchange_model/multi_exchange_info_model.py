@@ -27,17 +27,17 @@ class SingleExchangeInfoModel:
         self.default_safe_maintenance_margin_ratio = 0.7
         self.default_safe_cross_margin_usage = 0.7
 
-        self.target_leverage = 3
+        self.target_leverage = env_config.get_float("TARGET_LEVERAGE", 5)
         # self.target_leverage = 9
         self.target_maintenance_margin_ratio = 0.8
         self.target_margin_usage_ratio = 0.8
 
-        self.danger_leverage = 5
+        self.danger_leverage = env_config.get_float("DANGER_LEVERAGE", 8)
         # self.danger_leverage = 12
         self.danger_maintenance_margin_ratio = 0.9
         self.danger_margin_usage_ratio = 0.9
 
-        self.force_reduce_leverage = 10
+        self.force_reduce_leverage = env_config.get_float("FORCE_REDUCE_LEVERAGE", 10)
         self.force_reduce_maintenance_margin_ratio = 0.9
 
         # 账户资金信息
