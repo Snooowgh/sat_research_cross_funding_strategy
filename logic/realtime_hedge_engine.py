@@ -44,7 +44,7 @@ class RiskConfig:
     reduce_pos_min_profit_rate: float = -0.0013  # 平仓时最小价差收益率（0.13%）
     liquidity_depth_levels: int = 10  # 流动性检查深度层级
     auto_pos_balance_usd_value_limit: float = 1000.0 # 自动平衡仓位金额的最大USD值
-    single_position_max_usd_value: float = 100,000 # 单个仓位最大金额限制
+    single_position_max_usd_value: float = 100_000 # 单个仓位最大金额限制
     single_position_max_pct: float = 0.50  # 单个仓位最大比例限制
 
 
