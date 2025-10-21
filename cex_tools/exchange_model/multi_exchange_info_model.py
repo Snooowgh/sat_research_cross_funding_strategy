@@ -172,8 +172,8 @@ class MultiExchangeCombinedInfoModel:
 
     def __init__(self):
         # 基础配置
-        self.default_safe_leverage = 4.5
-        self.target_leverage = 8
+        self.default_safe_leverage = env_config.get_float("DEFAULT_SAFE_LEVERAGE", 1)
+        self.target_leverage = env_config.get_float("TARGET_LEVERAGE", 5)
         self.target_maintenance_margin_ratio = 0.8
         self.target_margin_usage_ratio = 0.95
 

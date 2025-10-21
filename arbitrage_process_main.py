@@ -63,7 +63,7 @@ class ManagerConfig:
     enable_notifications: bool = True
 
     # 启动配置
-    engine_startup_delay_sec: float = 30.0  # 引擎启动间隔(秒)，避免API请求过多
+    engine_startup_delay_sec: float = 1.0  # 引擎启动间隔(秒)，避免API请求过多
 
     # 健康管理配置
     memory_limit_mb: float = 1000.0  # 内存限制(MB)

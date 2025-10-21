@@ -44,6 +44,8 @@ class RiskConfig:
     reduce_pos_min_profit_rate: float = -0.0013  # 平仓时最小价差收益率（0.13%）
     liquidity_depth_levels: int = 10  # 流动性检查深度层级
     auto_pos_balance_usd_value_limit: float = 1000.0 # 自动平衡仓位金额的最大USD值
+    single_position_max_usd_value: float = 100,000 # 单个仓位最大金额限制
+    single_position_max_pct: float = 0.50  # 单个仓位最大比例限制
 
 
 @dataclass
@@ -222,8 +224,20 @@ class RealtimeHedgeEngine:
         return self._get_risk_data().max_open_notional_value(self.exchange_code_list)
 
     def _can_add_position(self):
-        """是否可以加仓"""
+        """
+            是否可以加仓
+            - 最大金额限制
+            - 占比限制
+            - 交易所可用资金限制
+        """
         combined_info: MultiExchangeCombinedInfoModel = self._get_risk_data()
+        if self._position1:
+            notional = abs(self._position1.notional)
+            if notional > self.risk_config.single_position_max_usd_value:
+                return False
+            pos_pct = notional / (combined_info.total_margin * combined_info.default_safe_leverage)
+            if pos_pct > self.risk_config.single_position_max_pct:
+                return False
         for info in combined_info.exchange_infos:
             if info.exchange_code in [self.exchange1.exchange_code, self.exchange2.exchange_code]:
                 if not info.can_add_position:
@@ -932,6 +946,9 @@ class RealtimeHedgeEngine:
         logger.info(f"当前持仓: {self._position1} / {self._position2}")
         if not self._can_add_position():
             logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 账户无法加仓")
+        spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
+        logger.info(f"价差: {spread_stats}")
+        logger.info(f"资金费率: {funding_rate1:.2%} / {funding_rate2:.2%}")
         while self.all_process_pause_event.is_set():
             logger.info(f"⏰ {self.symbol} {self.exchange_pair} 暂停等待启动..")
             await asyncio.sleep(1)
