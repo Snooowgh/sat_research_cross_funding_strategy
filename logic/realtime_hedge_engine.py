@@ -132,7 +132,9 @@ class RealtimeHedgeEngine:
             exchange2,  # 交易所2对象（用于下单）
             trade_config: TradeConfig,
             exchange_combined_info_cache=None,
-            risk_config: RiskConfig = None
+            risk_config: RiskConfig = None,
+            shared_ws_data = None,
+            all_process_pause_event = None
     ):
         self.stream1 = stream1
         self.stream2 = stream2
@@ -151,6 +153,8 @@ class RealtimeHedgeEngine:
         if self.trade_config.daemon_mode is True and exchange_combined_info_cache is None:
             raise Exception("持续运行模式必须提供 exchange_combined_info_cache 用于风控检查")
         self.exchange_combined_info_cache = exchange_combined_info_cache
+        self.shared_ws_data = shared_ws_data
+        self.all_process_pause_event = all_process_pause_event
 
         self.spread_analyzer = HedgeSpreadAnalyzer(exchange1, exchange2)
         self._running = False
@@ -928,6 +932,10 @@ class RealtimeHedgeEngine:
         logger.info(f"当前持仓: {self._position1} / {self._position2}")
         if not self._can_add_position():
             logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 账户无法加仓")
+        while self.all_process_pause_event.is_set():
+            logger.info(f"⏰ {self.symbol} {self.exchange_pair} 暂停等待启动..")
+            await asyncio.sleep(1)
+        logger.info(f"✅ {self.symbol} {self.exchange_pair} 启动交易")
         # 如果启用了超时，记录超时配置
         if self._timeout_enabled:
             logger.info(f"⏱️ {self.symbol} {self.exchange_pair}超时: {self.trade_config.no_trade_timeout_sec}秒")

@@ -36,7 +36,8 @@ class PositionHedgeEngine:
                  exchange2: AsyncExchangeAdapter,
                  stream1,  # position stream for exchange1
                  stream2,  # position stream for exchange2
-                 config: HedgeConfig):
+                 config: HedgeConfig,
+                 shared_ws_data: Dict):
         """
         初始化对冲引擎
 
@@ -46,6 +47,7 @@ class PositionHedgeEngine:
             stream1: 交易所1的position stream
             stream2: 交易所2的position stream
             config: 对冲配置
+            shared_ws_data 共享数据
         """
         self.exchange1 = exchange1
         self.exchange2 = exchange2
@@ -54,6 +56,7 @@ class PositionHedgeEngine:
         self.stream1 = stream1
         self.stream2 = stream2
         self.config = config
+        self.shared_ws_data = shared_ws_data
 
         # 对冲状态跟踪
         self.is_running = False
@@ -660,7 +663,8 @@ class PositionHedgeEngine:
 def create_hedge_engine(exchange1: AsyncExchangeAdapter,
                         exchange2: AsyncExchangeAdapter,
                         stream1,
-                        stream2) -> PositionHedgeEngine:
+                        stream2,
+                        shared_ws_data) -> PositionHedgeEngine:
     """
     创建仓位对冲引擎的便捷函数
 
@@ -680,5 +684,6 @@ def create_hedge_engine(exchange1: AsyncExchangeAdapter,
         exchange2=exchange2,
         stream1=stream1,
         stream2=stream2,
-        config=config
+        config=config,
+        shared_ws_data=shared_ws_data
     )

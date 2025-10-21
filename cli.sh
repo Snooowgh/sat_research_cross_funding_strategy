@@ -1,2 +1,2 @@
 #!/bin/bash
-docker compose exec -it arbitrage_process python3 scripts_cli.py
+docker compose exec -it arbitrage_process ipython3 script_cli.py

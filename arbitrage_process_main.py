@@ -134,13 +134,16 @@ async def _update_shared_engine_stats(risk_data_dict: Dict, engine, engine_confi
 
 
 def run_real_engine_in_process(engine_config: EngineConfig,
-                               risk_data_dict: Dict, stop_event):
+                                risk_data_dict: Dict, shared_ws_data: Dict, all_process_pause_event,
+                               stop_event):
     """
     在独立进程中运行真正的交易引擎
 
     Args:
         engine_config: 引擎配置
         risk_data_dict: 共享的风控数据字典
+        shared_ws_data
+        all_process_pause_event
         stop_event: 停止事件
     """
     async def engine_main():
@@ -205,7 +208,9 @@ def run_real_engine_in_process(engine_config: EngineConfig,
                 exchange2=exchange2,
                 trade_config=trade_config,
                 risk_config=risk_config,
-                exchange_combined_info_cache=risk_data_dict
+                exchange_combined_info_cache=risk_data_dict,
+                shared_ws_data=shared_ws_data,
+                all_process_pause_event=all_process_pause_event
             )
             engine.update_exchange_info_helper = update_exchange_info_helper
             # 启动引擎
@@ -262,12 +267,13 @@ def run_real_engine_in_process(engine_config: EngineConfig,
         traceback.print_exc()
 
 
-def run_position_hedge_engine_in_process(stop_event):
+def run_position_hedge_engine_in_process(stop_event, shared_ws_data: Dict):
     """
     在独立进程中运行PositionHedgeEngine
 
     Args:
         stop_event: 停止事件
+        shared_ws_data
     """
     async def hedge_engine_main():
         """PositionHedgeEngine主程序"""
@@ -321,7 +327,8 @@ def run_position_hedge_engine_in_process(stop_event):
                 exchange1=arbitrage_param.async_exchanges[available_exchanges[0]],
                 exchange2=arbitrage_param.async_exchanges[available_exchanges[1]],
                 stream1=stream_manager.streams.get(available_exchanges[0]),
-                stream2=stream_manager.streams.get(available_exchanges[1])
+                stream2=stream_manager.streams.get(available_exchanges[1]),
+                shared_ws_data=shared_ws_data
             )
             # 启动对冲引擎
             await hedge_engine.start()
@@ -405,6 +412,8 @@ class MultiProcessArbitrageManager:
 
         # 多进程管理
         self.process_manager = mp.Manager()
+        self.shared_ws_data = self.process_manager.dict()
+        self.all_process_pause_event = mp.Event()
         self.shared_risk_data = self.process_manager.dict()
         self.stop_events: Dict[str, mp.Event] = {}
         self.engine_processes: Dict[str, mp.Process] = {}
@@ -481,6 +490,7 @@ class MultiProcessArbitrageManager:
         start_engine_symbol_list = list(set(ArbitrageWhiteListParam.SYMBOL_LIST) | set(self.cached_risk_data.holding_symbol_list))
         # start_engine_symbol_list = ArbitrageWhiteListParam.SYMBOL_LIST
         # 顺序启动引擎，避免同时发起过多API请求
+        self.all_process_pause_event.set()
         for i, symbol in enumerate(start_engine_symbol_list):
             try:
                 # 选择最佳交易所组合
@@ -510,6 +520,10 @@ class MultiProcessArbitrageManager:
                 logger.error(f"❌ 启动 {symbol} 引擎失败: {e}")
                 # 即使失败也继续启动下一个引擎
                 continue
+        await asyncio.sleep(3)
+        await self._update_risk_data()
+        # 启动完成，解除暂停
+        self.all_process_pause_event.clear()
 
 
     async def _start_position_hedge_engine(self):
@@ -527,7 +541,7 @@ class MultiProcessArbitrageManager:
             # 创建并启动进程
             self.hedge_engine_process = mp.Process(
                 target=run_position_hedge_engine_in_process,
-                args=(self.hedge_engine_stop_event,),
+                args=(self.hedge_engine_stop_event, self.shared_ws_data),
                 name="PositionHedgeEngine"
             )
 
@@ -639,7 +653,9 @@ class MultiProcessArbitrageManager:
             # 创建并启动进程
             process = mp.Process(
                 target=run_real_engine_in_process,
-                args=(engine_config, self.shared_risk_data, stop_event),
+                args=(engine_config,
+                      self.shared_risk_data, self.shared_ws_data, self.all_process_pause_event,
+                      stop_event),
                 name=f"Engine_{process_key}"
             )
 
@@ -667,9 +683,6 @@ class MultiProcessArbitrageManager:
     )
     async def _update_risk_data(self, find_opportunities=False):
         """更新风控数据缓存（带重试机制）"""
-        logger.debug(
-            f"🔄 MAIN风控数据更新(间隔:{time.time() - self.last_risk_update_time:.0f}s):\n{self.cached_risk_data}")
-
         self.cached_risk_data = await get_multi_exchange_info_combined_model(
                 async_exchange_list=self.arbitrage_param.async_exchange_list,
                 find_opportunities=find_opportunities,
