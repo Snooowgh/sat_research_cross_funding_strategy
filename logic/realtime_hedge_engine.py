@@ -947,8 +947,8 @@ class RealtimeHedgeEngine:
         if not self._can_add_position():
             logger.warning(f"⚠️ {self.symbol} {self.exchange_pair} 账户无法加仓")
         spread_stats, funding_rate1, funding_rate2 = await self._get_pair_market_info()
-        logger.info(f"价差: {spread_stats}")
-        logger.info(f"资金费率: {funding_rate1:.2%} / {funding_rate2:.2%}")
+        logger.info(f"{self.symbol} {self.exchange_pair} 价差: {spread_stats}")
+        logger.info(f"{self.symbol} {self.exchange_pair} 资金费率: {funding_rate1:.2%} / {funding_rate2:.2%}")
         while self.all_process_pause_event.is_set():
             logger.info(f"⏰ {self.symbol} {self.exchange_pair} 暂停等待启动..")
             await asyncio.sleep(1)

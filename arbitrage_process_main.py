@@ -1106,6 +1106,10 @@ class MultiProcessArbitrageManager:
                         # 记录错误但继续运行
                         self._add_error_log("QUICK_RISK_UPDATE_FAILED", f"快速风控数据更新失败: {str(e)}")
 
+                    if not self.hedge_engine_process.is_alive():
+                        await async_notify_telegram("❌ 对冲引擎已停止，终止套利程序")
+                        await self.shutdown()
+
                     if self.shutdown_event.is_set():
                         logger.info("🛑 管理器收到停止信号，退出主循环")
                         break

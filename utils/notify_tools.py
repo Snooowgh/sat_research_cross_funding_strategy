@@ -461,7 +461,8 @@ def notify_telegram(content="", image_urls=None, debug=False, channel_type=CHANN
     if not content:
         return
     # 请求的URL，WebHook地址
-    content = content + "\n\n 📢 " + channel_type
+    notify_mark = env_config.get_str("NOTIFY_MARK", "")
+    content = content + "\n\n 📢 " + channel_type + " " + notify_mark
     if chat_ids is None:
         chat_ids = env_config.get("TELEGRAM_BOT_CHAT_ID", "")
     async def send_telegram_notification(
@@ -527,7 +528,8 @@ async def async_notify_telegram(content="", image_urls=None, debug=False, channe
     if not content:
         return
     # 请求的URL，WebHook地址
-    content = content + "\n\n 📢 " + channel_type
+    notify_mark = env_config.get_str("NOTIFY_MARK", "")
+    content = content + "\n\n 📢 " + channel_type + " " + notify_mark
     if chat_ids is None:
         chat_ids = env_config.get("TELEGRAM_BOT_CHAT_ID", "")
 
