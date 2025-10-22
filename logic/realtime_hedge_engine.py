@@ -196,7 +196,7 @@ class RealtimeHedgeEngine:
         for attempt in range(max_retries):
             try:
                 spread_stats = await self.spread_analyzer.analyze_spread(symbol=self.symbol,
-                                                                         interval="1m", limit=1000)
+                                                                         interval="1m", limit=500)
                 break  # 成功获取，跳出重试循环
             except Exception as e:
                 if attempt < max_retries - 1:  # 不是最后一次尝试
@@ -1199,7 +1199,7 @@ class RealtimeHedgeEngine:
             except Exception as e:
                 logger.error(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败: {e}, 等待重试 {retry_cnt}..")
                 retry_cnt -= 1
-                await asyncio.sleep((3 - retry_cnt) * 3)
+                await asyncio.sleep(random.randint(1, (3 - retry_cnt) * 3))
         if not risk_data:
             raise Exception(f"{self.symbol} {self.exchange_pair} 获取最新风控数据失败..")
         self._position1, self._position2 = risk_data.get_symbol_exchange_positions(self.symbol,

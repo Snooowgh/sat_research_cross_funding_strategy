@@ -9,11 +9,8 @@
 import asyncio
 from typing import Dict, List, Optional, Any, Union
 from loguru import logger
-
 from cex_tools.exchange_model.order_model import BaseOrderModel
 from utils.coroutine_utils import safe_execute_async
-
-from cex_tools.base_exchange import BaseExchange
 
 
 class AsyncExchangeAdapter:
@@ -32,25 +29,11 @@ class AsyncExchangeAdapter:
         """
         self.exchange = exchange
         self.exchange_code = exchange_code
-        self.is_async = self._check_if_async()
-
-    def _check_if_async(self) -> bool:
-        """检查交易所是否为异步实现"""
-        # 检查关键方法是否为异步
-        async_methods = ['get_tick_price', 'get_all_cur_positions',
-                        'make_new_order', 'get_available_margin']
-
-        for method_name in async_methods:
-            if hasattr(self.exchange, method_name):
-                method = getattr(self.exchange, method_name)
-                if asyncio.iscoroutinefunction(method):
-                    return True
-
-        return False
 
     async def _call_method(self, method_name: str, *args, **kwargs):
         """
         统一调用方法，自动处理同步/异步
+        同步方法使用 asyncio.to_thread 在线程池中执行，避免阻塞事件循环
 
         Args:
             method_name: 方法名
@@ -64,7 +47,14 @@ class AsyncExchangeAdapter:
             raise AttributeError(f"{self.exchange_code} 没有方法: {method_name}")
 
         method = getattr(self.exchange, method_name)
-        return await safe_execute_async(method, *args, **kwargs)
+        # return await safe_execute_async(method, *args, **kwargs)
+        # 检查方法是否为异步
+        if asyncio.iscoroutinefunction(method):
+            # 异步方法直接调用
+            return await method(*args, **kwargs)
+        else:
+            # 同步方法使用 asyncio.to_thread 在线程池中执行，避免阻塞事件循环
+            return await asyncio.to_thread(method, *args, **kwargs)
 
     # ========== 异步接口方法 ==========
 
@@ -80,6 +70,8 @@ class AsyncExchangeAdapter:
         """关闭连接"""
         if hasattr(self.exchange, 'close'):
             return await self._call_method('close')
+        else:
+            return None
 
     async def convert_size(self, symbol: str, size: float) -> float:
         """获取最新价格"""
@@ -176,10 +168,7 @@ class AsyncExchangeAdapter:
         """设置杠杆"""
         return await self._call_method('set_leverage', symbol, leverage)
 
-    async def cancel_all_orders(self, symbol: str = None) -> bool:
-        """取消所有订单"""
-        return await self._call_method('cancel_all_orders', symbol)
-
+  
     async def get_cross_margin_ratio(self) -> float:
         """获取维持保证金比例"""
         return await self._call_method('get_cross_margin_ratio')
@@ -253,158 +242,3 @@ class AsyncExchangeFactory:
 
         return async_exchanges
 
-
-# ========== 使用示例 ==========
-
-async def example_usage():
-    """使用示例"""
-    from cex_tools.binance_future import BinanceFuture
-    from cex_tools.lighter_future import LighterFuture
-    import time
-
-    # 创建同步交易所
-    binance = BinanceFuture(key="...", secret="...")
-
-    # 创建异步交易所
-    lighter = LighterFuture(l1_addr="...", api_private_key="...",
-                           account_index=0, api_key_index=0)
-
-    # 包装为异步接口
-    async_binance = AsyncExchangeFactory.create_async_exchange(binance, "binance")
-    async_lighter = AsyncExchangeFactory.create_async_exchange(lighter, "lighter")
-
-    # 统一异步调用
-    try:
-        # 初始化
-        await async_binance.init()
-        await async_lighter.init()
-
-        # 获取价格（统一异步调用）
-        binance_price = await async_binance.get_tick_price("BTCUSDT")
-        lighter_price = await async_lighter.get_tick_price("BTC")
-
-        print(f"Binance价格: {binance_price}")
-        print(f"Lighter价格: {lighter_price}")
-
-        # 并行获取保证金
-        margins = await asyncio.gather(
-            async_binance.get_available_margin(),
-            async_lighter.get_available_margin()
-        )
-
-        print(f"保证金: {margins}")
-
-        # ========== 新增：历史资金费率示例 ==========
-
-        # 获取当前资金费率
-        current_rates = await asyncio.gather(
-            async_binance.get_funding_rate("BTCUSDT", apy=True),
-            async_lighter.get_funding_rate("BTC", apy=True)
-        )
-
-        print(f"当前年化资金费率:")
-        print(f"  Binance: {current_rates[0]:.4%}")
-        print(f"  Lighter: {current_rates[1]:.4%}")
-
-        # 获取历史资金费率数据
-        end_time = int(time.time() * 1000)
-        start_time = end_time - (7 * 24 * 60 * 60 * 1000)  # 7天前
-
-        rate_histories = await asyncio.gather(
-            async_binance.get_funding_rate_history(
-                symbol="BTCUSDT",
-                limit=20,
-                start_time=start_time,
-                end_time=end_time,
-                apy=True
-            ),
-            async_lighter.get_funding_rate_history(
-                symbol="BTC",
-                limit=20,
-                start_time=start_time,
-                end_time=end_time,
-                apy=True
-            )
-        )
-
-        print(f"\n历史资金费率分析 (最近7天):")
-        for i, (exchange, history) in enumerate([("Binance", rate_histories[0]), ("Lighter", rate_histories[1])]):
-            if history and history.data:
-                latest = history.get_latest_rate()
-                avg_rate = history.get_average_rate(annualized=True)
-                print(f"  {exchange}:")
-                print(f"    最新费率: {latest.annualized_rate_percentage}")
-                print(f"    平均费率: {avg_rate:.4%}")
-                print(f"    数据条数: {len(history.data)}")
-            else:
-                print(f"  {exchange}: 无历史数据")
-
-        # 获取用户资金费历史
-        funding_histories = await asyncio.gather(
-            async_binance.get_funding_history(
-                symbol="BTCUSDT",
-                limit=10,
-                start_time=start_time,
-                end_time=end_time
-            ),
-            async_lighter.get_funding_history(
-                symbol="BTC",
-                limit=10,
-                start_time=start_time,
-                end_time=end_time
-            )
-        )
-
-        print(f"\n用户资金费历史 (最近7天):")
-        for i, (exchange, history) in enumerate([("Binance", funding_histories[0]), ("Lighter", funding_histories[1])]):
-            if history and history.data:
-                total_received = history.get_total_received()
-                total_paid = history.get_total_paid()
-                net_amount = total_received + total_paid
-                print(f"  {exchange}:")
-                print(f"    总收到: {total_received:.4f} USDT")
-                print(f"    总支付: {abs(total_paid):.4f} USDT")
-                print(f"    净金额: {net_amount:+.4f} USDT")
-                print(f"    记录条数: {len(history.data)}")
-            else:
-                print(f"  {exchange}: 无资金费记录")
-
-        # ========== 跨交易所资金费率对比 ==========
-        print(f"\n跨交易所资金费率对比:")
-
-        # 获取多个交易所的当前资金费率进行对比
-        symbols = ["BTCUSDT", "ETHUSDT"]
-        for symbol in symbols:
-            try:
-                lighter_symbol = symbol.replace("USDT", "")
-
-                rates = await asyncio.gather(
-                    async_binance.get_funding_rate(symbol, apy=True),
-                    async_lighter.get_funding_rate(lighter_symbol, apy=True)
-                )
-
-                binance_rate, lighter_rate = rates
-                difference = abs(binance_rate - lighter_rate)
-
-                print(f"  {symbol}:")
-                print(f"    Binance: {binance_rate:.4%}")
-                print(f"    Lighter:  {lighter_rate:.4%}")
-                print(f"    差异:    {difference:.4%}")
-
-                if difference > 0.001:  # 0.1%差异
-                    print(f"    🚨 发现显著差异，可能存在套利机会!")
-
-            except Exception as e:
-                print(f"  {symbol}: 获取失败 - {e}")
-
-    except Exception as e:
-        logger.error(f"示例执行失败: {e}")
-
-    finally:
-        # 清理
-        await async_binance.close()
-        await async_lighter.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(example_usage())

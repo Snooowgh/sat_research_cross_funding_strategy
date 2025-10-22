@@ -32,14 +32,18 @@ async def main():
     #                                                 0.001,
     #                                                 105000,
     #                                               reduceOnly=True)
+    # start = time.time()
     # print(await arbitrage_param.binance_unified_exchange.make_new_order("BTC",
     #                                                               "BUY",
     #                                                               "LIMIT",
     #                                                               0.001,
-    #                                                               105000))
-    # await asyncio.sleep(3)
+    #                                                               101000))
+    # print(time.time() - start)
+    # start = time.time()
+    # await asyncio.sleep(1)
     # print(await arbitrage_param.binance_unified_exchange.get_open_orders(symbol="BTC"))
     # print(await arbitrage_param.binance_unified_exchange.cancel_all_orders(symbol="BTC"))
+    # print(time.time() - start)
     # print(await arbitrage_param.binance_unified_exchange.get_all_cur_positions())
 
 
