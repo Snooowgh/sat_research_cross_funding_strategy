@@ -355,16 +355,15 @@ class PositionHedgeEngine:
             self._update_hedge_stats(
                 price_difference, slippage, delay_ms, is_profitable
             )
-
+            value = amount * last_filled_price
+            profit_rate = profit_usd / value
             logger.success(f"✅ 对冲订单结果: {target_exchange.exchange_code} {symbol} {side} {amount}")
             logger.info(f"📊 对冲执行详情:")
-            logger.info(f"   数量: {amount}")
-            logger.info(f"   原始价格: {last_filled_price}")
-            logger.info(f"   对冲价格: {hedge_price}")
-            logger.info(f"   价差: {price_difference:.4f}")
+            logger.info(f"   数量: {amount} (${value:.2f})")
+            logger.info(f"   价格: {last_filled_price} / {hedge_price} ({price_difference})")
             logger.info(f"   滑点: {slippage:.4f}")
+            logger.info(f"   收益: {profit_usd:.2f} USD ({profit_rate:.3%}) ({'盈利' if is_profitable else '亏损'})")
             logger.info(f"   延迟: {delay_ms:.2f}ms")
-            logger.info(f"   收益: {profit_usd:.2f} USD ({'盈利' if is_profitable else '亏损'})")
         except Exception as e:
             logger.warning(f"{target_exchange.exchange_code} 计算对冲单收益率失败: {e}")
 
