@@ -31,7 +31,7 @@ from utils.notify_tools import send_slack_message
 class BinanceFuture(UMFutures):
 
     def __init__(self, key=None, secret=None, erc20_deposit_addr="", maker_fee_rate=0.00018,
-                 taker_fee_rate=0.00045, recvWindow=5000, timeout=10000, testnet=False, **kwargs):
+                 taker_fee_rate=0.00045, recvWindow=60000, timeout=10000, testnet=False, **kwargs):
         # 根据testnet参数选择不同的基类和URL
         if testnet:
             from binance.um_futures import UMFutures
@@ -297,6 +297,7 @@ class BinanceFuture(UMFutures):
                                   timeInForce=timeInForce,
                                   price=price,
                                   stopPrice=stopPrice,
+                                  recvWindow=self.recvWindow,
                                   **kwargs)
         content = f"⚠️ {msg} {self.exchange_code} 下单: {symbol} {side} {order_type} {price} {quantity} " \
                   f"{(time.time() - start_time) * 1000:.2f}ms"

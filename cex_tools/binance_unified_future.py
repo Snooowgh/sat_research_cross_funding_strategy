@@ -81,6 +81,7 @@ class BinanceUnifiedFuture:
 
         # 所有公共信息可以直接用原有接口
         self.base_binance_future = BinanceFuture()
+        self.default_recv_window = 60000
 
     def __convert_to_ccxt_symbol(self, symbol: str) -> str:
         """转换为CCXT格式的交易对符号"""
@@ -116,7 +117,7 @@ class BinanceUnifiedFuture:
         """获取所有当前仓位 - 使用Portfolio Margin SDK"""
         try:
             # 根据账户类型选择合适的端点
-            positions = self.rest_client.query_um_position_information().data()
+            positions = self.rest_client.query_um_position_information(recv_window=self.default_recv_window).data()
             # Portfolio Margin SDK返回的数据格式示例:
             # [QueryUmPositionInformationResponse(entry_price='0.30923', leverage='5', mark_price='0.3092429',
             #  max_notional_value='6000000.0', position_amt='19.0', notional='5.8756151',
@@ -136,7 +137,8 @@ class BinanceUnifiedFuture:
         """获取指定交易对仓位 - 使用Portfolio Margin SDK"""
         symbol = self.convert_symbol(symbol)
         try:
-            positions = self.rest_client.query_um_position_information(symbol).data()
+            positions = self.rest_client.query_um_position_information(symbol,
+                                                                       recv_window=self.default_recv_window).data()
             if positions:
                 # 过滤有仓位的数据
                 active_positions = list(filter(lambda pos: float(pos.position_amt or 0) != 0, positions))
@@ -230,7 +232,8 @@ class BinanceUnifiedFuture:
                                                      time_in_force=time_in_force,
                                                      quantity=quantity,
                                                      reduce_only=kwargs.get("reduce_only", False),
-                                                     price=price)
+                                                     price=price,
+                                                     recv_window=self.default_recv_window)
 
             content = f"⚠️ {msg} {self.exchange_code} 下单: {symbol} {side} {order_type} {price} {quantity} " \
                       f"{(time.time() - start_time) * 1000:.2f}ms"
