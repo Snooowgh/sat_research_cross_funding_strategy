@@ -183,9 +183,11 @@ class AsyncExchangeAdapter:
 
     def __getattr__(self, name: str):
         """代理访问原始交易所的属性"""
-        if hasattr(self.exchange, name):
-            return getattr(self.exchange, name)
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+        # 使用 object.__getattribute__ 避免 __getattr__ 递归调用
+        try:
+            return object.__getattribute__(self.exchange, name)
+        except AttributeError:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def __str__(self):
         return f"AsyncExchangeAdapter({self.exchange_code})"
