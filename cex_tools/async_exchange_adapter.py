@@ -30,6 +30,10 @@ class AsyncExchangeAdapter:
         self.exchange = exchange
         self.exchange_code = exchange_code
 
+        # 初始化常用属性，避免使用 __getattr__
+        self.taker_fee_rate = getattr(exchange, 'taker_fee_rate', 0.001)
+        self.maker_fee_rate = getattr(exchange, 'maker_fee_rate', 0.001)
+
     async def _call_method(self, method_name: str, *args, **kwargs):
         """
         统一调用方法，自动处理同步/异步
@@ -181,13 +185,9 @@ class AsyncExchangeAdapter:
 
     # ========== 属性访问代理 ==========
 
-    def __getattr__(self, name: str):
-        """代理访问原始交易所的属性"""
-        # 使用 object.__getattribute__ 避免 __getattr__ 递归调用
-        try:
-            return object.__getattribute__(self.exchange, name)
-        except AttributeError:
-            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+    def get_exchange_property(self, property_name: str, default=None):
+        """安全获取交易所属性"""
+        return getattr(self.exchange, property_name, default)
 
     def __str__(self):
         return f"AsyncExchangeAdapter({self.exchange_code})"
