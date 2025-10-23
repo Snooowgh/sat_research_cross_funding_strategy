@@ -133,7 +133,7 @@ async def _update_shared_engine_stats(risk_data_dict: Dict, engine, engine_confi
         logger.debug(f"更新引擎统计数据失败: {e}")
 
 
-def run_real_engine_in_process(engine_config: EngineConfig,
+def run_real_engine_in_process(engine_config: EngineConfig, arbitrage_param,
                                 risk_data_dict: Dict, shared_ws_data: Dict, all_process_pause_event,
                                stop_event):
     """
@@ -141,6 +141,7 @@ def run_real_engine_in_process(engine_config: EngineConfig,
 
     Args:
         engine_config: 引擎配置
+        arbitrage_param
         risk_data_dict: 共享的风控数据字典
         shared_ws_data
         all_process_pause_event
@@ -160,11 +161,6 @@ def run_real_engine_in_process(engine_config: EngineConfig,
             )
 
             logger.info(f"🚀 启动 {engine_config.symbol}({engine_config.exchange1_code}-{engine_config.exchange2_code}) 交易引擎 ")
-
-            # 初始化交易所参数
-            arbitrage_param = MultiExchangeArbitrageParam(auto_init=True)
-            await arbitrage_param.init_async_exchanges()
-            await asyncio.sleep(0.3)  # 确保交易所初始化完成
 
             async def update_exchange_info_helper():
                 info = await get_multi_exchange_info_combined_model(
@@ -267,11 +263,12 @@ def run_real_engine_in_process(engine_config: EngineConfig,
         traceback.print_exc()
 
 
-def run_position_hedge_engine_in_process(stop_event, shared_ws_data: Dict):
+def run_position_hedge_engine_in_process(arbitrage_param, stop_event, shared_ws_data: Dict):
     """
     在独立进程中运行PositionHedgeEngine
 
     Args:
+        arbitrage_param
         stop_event: 停止事件
         shared_ws_data
     """
@@ -291,12 +288,6 @@ def run_position_hedge_engine_in_process(stop_event, shared_ws_data: Dict):
             )
 
             logger.info("🚀 启动 PositionHedgeEngine 进程")
-
-            # 初始化交易所参数
-            arbitrage_param = MultiExchangeArbitrageParam(auto_init=True)
-            await arbitrage_param.init_async_exchanges()
-            await asyncio.sleep(0.3)  # 确保交易所初始化完成
-
             # 获取所有可用的交易所
             available_exchanges = list(arbitrage_param.async_exchanges.keys())
             if len(available_exchanges) < 2:
@@ -539,7 +530,7 @@ class MultiProcessArbitrageManager:
             # 创建并启动进程
             self.hedge_engine_process = mp.Process(
                 target=run_position_hedge_engine_in_process,
-                args=(self.hedge_engine_stop_event, self.shared_ws_data),
+                args=(self.arbitrage_param, self.hedge_engine_stop_event, self.shared_ws_data),
                 name="PositionHedgeEngine"
             )
 
@@ -651,7 +642,7 @@ class MultiProcessArbitrageManager:
             # 创建并启动进程
             process = mp.Process(
                 target=run_real_engine_in_process,
-                args=(engine_config,
+                args=(engine_config, self.arbitrage_param,
                       self.shared_risk_data, self.shared_ws_data, self.all_process_pause_event,
                       stop_event),
                 name=f"Engine_{process_key}"
