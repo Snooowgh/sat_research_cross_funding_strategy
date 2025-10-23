@@ -677,6 +677,8 @@ class RealtimeHedgeEngine:
                         logger.warning(f"⚠️ {self.symbol} 可用保证金不足.. 不能下单加仓")
                     elif "to reduce or close" in str(e):
                         logger.warning(f"⚠️ {self.symbol} 仓位已减仓完毕")
+                    elif "Order price is not within the price limit" in str(e):
+                        logger.warning(f"⚠️ {self.symbol} 下单价格过远")
                     else:
                         raise e
             else:
