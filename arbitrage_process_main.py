@@ -300,8 +300,7 @@ def run_position_hedge_engine_in_process(stop_event, shared_ws_data: Dict):
             # 获取所有可用的交易所
             available_exchanges = list(arbitrage_param.async_exchanges.keys())
             if len(available_exchanges) < 2:
-                logger.error("❌ 需要至少2个可用交易所才能运行仓位对冲引擎")
-                return
+                raise Exception("❌ 需要至少2个可用交易所才能运行仓位对冲引擎")
 
             logger.info(f"📝 可用交易所: {available_exchanges}")
 
@@ -314,8 +313,7 @@ def run_position_hedge_engine_in_process(stop_event, shared_ws_data: Dict):
             )
 
             if not success:
-                logger.error("❌ 仓位WebSocket流启动失败，无法启动对冲引擎")
-                return
+                raise Exception("❌ 仓位WebSocket流启动失败，无法启动对冲引擎")
 
             logger.success("✅ 仓位WebSocket流启动成功")
 
