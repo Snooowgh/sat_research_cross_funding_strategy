@@ -64,7 +64,7 @@ class BinanceUnifiedFuture:
         self.api_secret = secret
         configuration = ConfigurationRestAPI(api_key=self.api_key, api_secret=self.api_secret,
                                              base_path=DERIVATIVES_TRADING_PORTFOLIO_MARGIN_REST_API_PROD_URL,
-                                             timeout=4000)
+                                             timeout=4500)
         self.client = DerivativesTradingPortfolioMargin(config_rest_api=configuration)
         self.rest_client = self.client.rest_api
         if self.rest_client.get_um_current_position_mode().data().dual_side_position is True:
